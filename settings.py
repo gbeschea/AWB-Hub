@@ -20,12 +20,8 @@ def json_config_settings_source(settings: BaseSettings) -> Dict[str, Any]:
 class Settings(BaseSettings):
     DATABASE_URL: str
     
-    COURIER_MAP: Optional[Dict[str, str]] = None
     PAYMENT_MAP: Optional[Dict[str, List[str]]] = None
     COURIER_STATUS_MAP: Optional[Dict[str, Dict[str, List[str]]]] = None
-    SAMEDAY_CONFIG: Optional[Dict[str, Any]] = None
-    DPD_CONFIG: Optional[Dict[str, Any]] = None
-    ECONT_CONFIG: Optional[Dict[str, Any]] = None
     
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
@@ -66,9 +62,5 @@ def load_json_config(file_path: str) -> Any:
             return json.load(f)
     return {}
 
-settings.COURIER_MAP = load_json_config('config/courier_map.json')
 settings.PAYMENT_MAP = load_json_config('config/payment_map.json')
 settings.COURIER_STATUS_MAP = load_json_config('config/courier_status_map.json')
-settings.SAMEDAY_CONFIG = load_json_config('config/sameday.json')
-settings.DPD_CONFIG = load_json_config('config/dpd.json') 
-settings.ECONT_CONFIG = load_json_config('config/econt.json')

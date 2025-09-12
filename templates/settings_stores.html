@@ -69,6 +69,18 @@
 
                     <label for="access_token-{{ store.id }}">Access Token (lasă gol pentru a nu schimba)</label>
                     <input type="password" id="access_token-{{ store.id }}" name="access_token" value="{{ store.access_token }}">
+                    <label for="paper_size-{{ store.id }}">
+    Format Hârtie Implicit
+    <select id="paper_size-{{ store.id }}" name="paper_size" required>
+        <option value="A4" {% if store.paper_size == 'A4' %}selected{% endif %}>A4</option>
+        <option value="A6" {% if store.paper_size == 'A6' %}selected{% endif %}>A6</option>
+    </select>
+</label>
+<label for="dpd_client_id-{{ store.id }}">
+    DPD Client ID
+    <input type="text" id="dpd_client_id-{{ store.id }}" name="dpd_client_id" value="{{ store.dpd_client_id or '' }}" placeholder="Client ID specific DPD">
+</label>
+
 
                     <div class="grid">
                         <label for="is_active-{{ store.id }}">

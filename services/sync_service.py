@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
+import json
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy.orm import joinedload
 from sqlalchemy import select
@@ -40,21 +41,75 @@ def map_payment_method(gateways: List[str], financial_status: str) -> str:
 
     return ", ".join(raw_gateways)
 
-def courier_from_shopify(tracking_company: str, tracking_url: str) -> str:
-    search_text = (tracking_company or '').strip().lower()
+async def courier_from_shopify(db: AsyncSession, tracking_company: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Map a tracking company string to our courier and account keys using the database.
+    """
+    search_text = (tracking_company or '').strip()
     if not search_text:
-        return "unknown"
+        return None, None
+
+    # Caută o potrivire directă
+    result = await db.execute(select(models.CourierMapping).where(models.CourierMapping.shopify_name == search_text))
+    mapping = result.scalar_one_or_none()
+
+    if mapping:
+        # Preluăm și contul pentru a afla tipul de curier
+        acc_res = await db.execute(select(models.CourierAccount).where(models.CourierAccount.account_key == mapping.account_key))
+        account = acc_res.scalar_one_or_none()
+        if account:
+            return account.courier_type, account.account_key
+
+    logging.warning(f"Nu s-a găsit mapare în BD pentru curierul: '{tracking_company}'")
+    return None, None
+
+
+def _get_mapped_address(order_data: Dict[str, Any], pii_source: str) -> Dict[str, Any]:
+    """Funcție helper pentru a extrage și mapa adresa PII din diverse surse."""
+    address = {}
     
-    if settings.COURIER_MAP:
-        sorted_courier_keys = sorted(settings.COURIER_MAP.keys(), key=len, reverse=True)
+    if pii_source == 'shopify':
+        source = order_data.get('shippingAddress')
+        if not source:
+            return address
+        
+        first_name = source.get('firstName', '')
+        last_name = source.get('lastName', '')
+        
+        address = {
+            'name': f"{first_name} {last_name}".strip(),
+            'address1': source.get('address1'),
+            'address2': source.get('address2'),
+            'phone': source.get('phone'),
+            'city': source.get('city'),
+            'zip': source.get('zip'),
+            'province': source.get('province'),
+            'country': source.get('country'),
+            'email': order_data.get('email')
+        }
 
-        for key in sorted_courier_keys:
-            if key.lower() in search_text:
-                return settings.COURIER_MAP[key]
-            
-    logging.warning(f"Nu s-a putut mapa curierul pentru '{tracking_company}'.")
-    return tracking_company
+    elif pii_source == 'metafield':
+        source_node = order_data.get('metafield')
+        if not source_node or not source_node.get('value'):
+            return address
+        
+        try:
+            metafield_data = json.loads(source_node['value'])
+            address = {
+                'name': f"{metafield_data.get('first_name', '')} {metafield_data.get('last_name', '')}".strip(),
+                'address1': metafield_data.get('address1'),
+                'address2': metafield_data.get('address2'),
+                'phone': metafield_data.get('phone_number'),
+                'city': metafield_data.get('city'),
+                'zip': metafield_data.get('postal_code'),
+                'province': metafield_data.get('county'),
+                'country': metafield_data.get('country'),
+                'email': metafield_data.get('email')
+            }
+        except json.JSONDecodeError:
+            logging.warning(f"Nu s-a putut decoda metafield-ul PII pentru comanda {order_data.get('name')}")
 
+    return address
 
 async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     start_ts = datetime.now(timezone.utc)
@@ -111,43 +166,21 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
             order_res = await db.execute(select(models.Order).options(joinedload('*')).where(models.Order.shopify_order_id == sid))
             order = order_res.unique().scalar_one_or_none()
 
+            shipping_address = _get_mapped_address(o, store_rec.pii_source)
+            if not shipping_address:
+                 logging.warning(f"Nu s-au găsit date PII pentru comanda {o.get('name')} din sursa '{store_rec.pii_source}'")
+
             gateways = o.get('paymentGatewayNames', [])
             financial_status = o.get('displayFinancialStatus', 'unknown')
             mapped_payment = map_payment_method(gateways, financial_status)
             total_price_str = o.get('totalPriceSet', {}).get('shopMoney', {}).get('amount', '0.0')
-            
-            shipping_address = {}
-            if store_rec.pii_source == 'shopify':
-                shipping_address = o.get('shippingAddress') or {}
-            elif store_rec.pii_source == 'database':
-                pii_data_res = await db.execute(select(models.PiiData).where(models.PiiData.order_number == o.get('name')))
-                pii_data = pii_data_res.scalar_one_or_none()
-                if pii_data:
-                    shipping_address = {
-                        'name': pii_data.shipping_name,
-                        'address1': pii_data.shipping_address1,
-                        'address2': pii_data.shipping_address2,
-                        'phone': pii_data.shipping_phone,
-                        'city': pii_data.shipping_city,
-                        'zip': pii_data.shipping_zip,
-                        'province': pii_data.shipping_province,
-                        'country': pii_data.shipping_country,
-                    }
-                else:
-                    logging.warning(f"PII data not found in database for order {o.get('name')}")
 
             status_from_shopify = (o.get('displayFulfillmentStatus') or 'unfulfilled').strip().lower()
             if status_from_shopify == 'success':
                 status_from_shopify = 'fulfilled'
 
             fulfillment_orders = o.get('fulfillmentOrders', {}).get('edges', [])
-            has_active_hold = False
-            if fulfillment_orders:
-                for ff_edge in fulfillment_orders:
-                    holds = ff_edge.get('node', {}).get('fulfillmentHolds', [])
-                    if holds:
-                        has_active_hold = True
-                        break
+            has_active_hold = any(ff_edge.get('node', {}).get('fulfillmentHolds') for ff_edge in fulfillment_orders)
 
             order_data = {
                 'name': o.get('name'),
@@ -193,7 +226,7 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
                     tracking_info = tracking_info_list[0]
                     awb = str(tracking_info.get('number', '')).strip()
                     if not awb: continue
-
+                    
                     fulfillment_date = _dt(f.get('createdAt'))
                     courier_key = courier_from_shopify(tracking_info.get('company', ''), tracking_info.get('url', ''))
 

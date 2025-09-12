@@ -6,36 +6,51 @@ from typing import List, Dict, Any, Optional
 from settings import ShopifyStore, settings
 import models
 
-
-import httpx
-import logging
-from datetime import datetime, timedelta, timezone
-from settings import ShopifyStore
-
 async def fetch_orders(store: ShopifyStore, since_days: int) -> list:
     since_date = datetime.now(timezone.utc) - timedelta(days=since_days)
     since_str = since_date.isoformat()
     
+    # Construim dinamic partea de query pentru adresa de livrare
     shipping_address_query_part = ""
     if store.pii_source == 'shopify':
-        logging.warning(f"Se preiau datele PII din Shopify pentru {store.domain}")
+        logging.warning(f"Se preiau datele PII din Shopify API pentru {store.domain}")
         shipping_address_query_part = """
             shippingAddress {
-                address1, address2, city, country, name, phone, province, zip
+                firstName
+                lastName
+                address1
+                address2
+                city
+                province
+                zip
+                country
+                phone
             }
+            email
         """
 
+    # Query-ul este acum formatat dinamic pentru a include și metafield-ul
     query = f"""
     {{
         orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>{since_str}") {{
             edges {{
                 node {{
-                    id, name, createdAt, cancelledAt, displayFinancialStatus, displayFulfillmentStatus, tags, note,
-                    totalPriceSet {{ shopMoney {{ amount }} }},
-                    paymentGatewayNames,
+                    id
+                    name
+                    createdAt
+                    cancelledAt
+                    displayFinancialStatus
+                    displayFulfillmentStatus
+                    tags
+                    note
+                    totalPriceSet {{ shopMoney {{ amount }} }}
+                    paymentGatewayNames
                     {shipping_address_query_part}
-                    lineItems(first: 50) {{ edges {{ node {{ sku, title, quantity }} }} }},
-                    fulfillments {{ createdAt, trackingInfo {{ company, number, url }}, id }},
+                    metafield(namespace: "custom", key: "adresa") {{
+                        value
+                    }}
+                    lineItems(first: 50) {{ edges {{ node {{ sku, title, quantity }} }} }}
+                    fulfillments {{ createdAt, trackingInfo {{ company, number, url }}, id }}
                     fulfillmentOrders(first: 10) {{ edges {{ node {{ status, fulfillmentHolds {{ reason, reasonNotes }} }} }} }}
                 }}
             }}
@@ -44,19 +59,14 @@ async def fetch_orders(store: ShopifyStore, since_days: int) -> list:
     """
     
     url = f"https://{store.domain}/admin/api/{store.api_version}/graphql.json"
-    
-    # --- START MODIFICARE ---
     headers = {
         "X-Shopify-Access-Token": store.access_token,
-        "Content-Type": "application/json",  # Corectat: application/json
+        "Content-Type": "application/json",
     }
-    # Am împachetat query-ul într-un dicționar JSON
     payload = {"query": query}
-    # --- FINAL MODIFICARE ---
 
     async with httpx.AsyncClient() as client:
         try:
-            # Am schimbat 'data=query' în 'json=payload'
             response = await client.post(url, json=payload, headers=headers, timeout=60.0)
             response.raise_for_status()
             data = response.json()

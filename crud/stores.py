@@ -33,7 +33,8 @@ async def update_store(db: AsyncSession, store_id: int, name: str, domain: str, 
         
         # ADĂUGAT: Salvăm noua valoare în baza de date
         store.pii_source = pii_source
-        
+        store.paper_size = paper_size
+        store.dpd_client_id = dpd_client_id # ADĂUGAT
         await db.commit()
         await db.refresh(store)
     return store

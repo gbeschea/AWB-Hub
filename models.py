@@ -1,6 +1,9 @@
+# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/models.py
+
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float, Table, Index, Boolean
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+# MODIFICAT: Am adăugat JSONB la import
+from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
 from sqlalchemy.sql import func
@@ -33,6 +36,7 @@ class StoreCategory(Base):
     name = Column(String(255), unique=True, nullable=False)
     stores = relationship("Store", secondary=store_category_map, back_populates="categories")
     default_courier = Column(String(64), nullable=True)
+    default_courier_account = Column(String(64), nullable=True)
     dpd_pickup_location_id = Column(String(255), nullable=True)
 
 class Store(Base):
@@ -47,6 +51,9 @@ class Store(Base):
   last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
   orders = relationship('Order', back_populates='store')
   categories = relationship("StoreCategory", secondary=store_category_map, back_populates="stores")
+  paper_size = Column(String(16), default='A6', nullable=False)
+  dpd_client_id = Column(String(255), nullable=True) # ADĂUGAT
+
 
 class Order(Base):
   __tablename__ = 'orders'
@@ -56,7 +63,6 @@ class Order(Base):
   name = Column(String(64))
   customer = Column(String(255))
   created_at = Column(TIMESTAMP(timezone=True))
-  # NOU: Adăugăm updated_at cu auto-actualizare
   updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
   cancelled_at = Column(TIMESTAMP(timezone=True), nullable=True)
   financial_status = Column(String(64), index=True)
@@ -89,36 +95,18 @@ class Order(Base):
   shipments = relationship('Shipment', back_populates='order', cascade='all, delete-orphan')
   fulfillment_orders = relationship('FulfillmentOrder', back_populates='order', cascade='all, delete-orphan')
 
-class PiiData(Base):
-    __tablename__ = 'pii_data'
-    order_number = Column(String(255), primary_key=True)
-    shipping_name = Column(Text, nullable=True)
-    shipping_address1 = Column(Text, nullable=True)
-    shipping_address2 = Column(Text, nullable=True)
-    shipping_phone = Column(String(64), nullable=True)
-    shipping_city = Column(String(255), nullable=True)
-    shipping_zip = Column(String(32), nullable=True)
-    shipping_province = Column(String(255), nullable=True)
-    shipping_country = Column(String(255), nullable=True)
-
-
 class RomaniaAddress(Base):
     __tablename__ = 'romania_addresses'
     id = Column(Integer, primary_key=True)
     judet = Column(String(255), index=True)
     localitate = Column(String(255), index=True)
     sector = Column(String(32), nullable=True, index=True)
-    
-    # Am înlocuit 'strada' cu cele două coloane noi
     tip_artera = Column(String(64), nullable=True, index=True)
     nume_strada = Column(String(512), nullable=True, index=True)
-    
     cod_postal = Column(String(10), index=True)
-
     __table_args__ = (
         Index('ix_localitate_judet', 'localitate', 'judet'),
     )
-
 
 class LineItem(Base):
   __tablename__ = 'line_items'
@@ -143,7 +131,7 @@ class Shipment(Base):
   printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
   last_status = Column(String(255), nullable=True, index=True)
   last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  derived_status = Column(String(255), nullable=True, index=True) 
+  derived_status = Column(String(255), nullable=True, index=True)
   order = relationship('Order', back_populates='shipments')
 
 class FulfillmentOrder(Base):
@@ -173,3 +161,21 @@ class PrintLogEntry(Base):
     order_name = Column(String(64))
     awb = Column(String(64), index=True)
     log = relationship('PrintLog', back_populates='entries')
+
+# --- Modele Noi pentru Curieri ---
+
+class CourierAccount(Base):
+    __tablename__ = 'courier_accounts'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    account_key = Column(String(64), unique=True, nullable=False, index=True)
+    courier_type = Column(String(64), nullable=False, index=True)
+    tracking_url = Column(String(512), nullable=True)
+    credentials = Column(JSONB, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+class CourierMapping(Base):
+    __tablename__ = 'courier_mappings'
+    id = Column(Integer, primary_key=True)
+    shopify_name = Column(String(255), unique=True, nullable=False, index=True)
+    account_key = Column(String(64), ForeignKey('courier_accounts.account_key'), nullable=False)
