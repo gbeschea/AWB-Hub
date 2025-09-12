@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import models
-from settings import settings, ShopifyStore # MODIFICAT: Importăm și ShopifyStore
+from settings import settings, ShopifyStore
 from . import shopify_service, address_service, courier_service
 from .utils import calculate_and_set_derived_status
 from websocket_manager import manager
@@ -27,11 +27,12 @@ def map_payment_method(gateways: List[str], financial_status: str) -> str:
     lower_gateways_set = {g.lower().strip() for g in raw_gateways}
     gateway_str_joined = ", ".join(raw_gateways).lower()
 
-    for standard_name, keywords in settings.PAYMENT_MAP.items():
-        if not lower_gateways_set.isdisjoint(keywords):
-            return standard_name
-        if any(keyword in gateway_str_joined for keyword in keywords):
-            return standard_name
+    if settings.PAYMENT_MAP:
+        for standard_name, keywords in settings.PAYMENT_MAP.items():
+            if not lower_gateways_set.isdisjoint(keywords):
+                return standard_name
+            if any(keyword in gateway_str_joined for keyword in keywords):
+                return standard_name
 
     if not gateway_str_joined.strip():
         if financial_status == 'paid': return "Fara plata"
@@ -44,11 +45,12 @@ def courier_from_shopify(tracking_company: str, tracking_url: str) -> str:
     if not search_text:
         return "unknown"
     
-    sorted_courier_keys = sorted(settings.COURIER_MAP.keys(), key=len, reverse=True)
+    if settings.COURIER_MAP:
+        sorted_courier_keys = sorted(settings.COURIER_MAP.keys(), key=len, reverse=True)
 
-    for key in sorted_courier_keys:
-        if key.lower() in search_text:
-            return settings.COURIER_MAP[key]
+        for key in sorted_courier_keys:
+            if key.lower() in search_text:
+                return settings.COURIER_MAP[key]
             
     logging.warning(f"Nu s-a putut mapa curierul pentru '{tracking_company}'.")
     return tracking_company
@@ -60,8 +62,6 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     logging.warning(f"ORDER SYNC ({sync_type}) a pornit pentru ultimele {days} zile.")
     await manager.broadcast({"type": "sync_start", "message": f"Sincronizare comenzi ({sync_type})...", "sync_type": "orders"})
 
-    # --- START MODIFICARE MAJORĂ ---
-    # Preluăm magazinele direct din baza de date, nu din fișierele de configurare
     stores_from_db_res = await db.execute(select(models.Store).where(models.Store.is_active == True))
     stores_from_db = stores_from_db_res.scalars().all()
 
@@ -70,21 +70,18 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
         await manager.broadcast({"type": "sync_end", "message": "Nu sunt magazine active pentru sincronizare."})
         return
 
-    # Construim obiectele ShopifyStore de care are nevoie shopify_service
-    # Mapăm câmpurile din baza de date (ex: access_token) la cele așteptate (ex: api_key)
     stores_to_sync = [
         ShopifyStore(
             brand=db_store.name,
             domain=db_store.domain,
             shared_secret=db_store.shared_secret,
-            api_key=db_store.access_token, # Mapare
-            api_version="2024-04" # Poate fi adăugat ca un câmp în DB pe viitor
+            # MODIFICAT: Am schimbat 'api_key' în 'access_token' pentru a se potrivi cu modelul
+            access_token=db_store.access_token,
+            api_version="2024-04"
         ) for db_store in stores_from_db
     ]
     
     fetch_tasks = [shopify_service.fetch_orders(s, since_days=days) for s in stores_to_sync]
-    # --- FINAL MODIFICARE MAJORĂ ---
-
     all_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
     existing_stores_res = await db.execute(select(models.Store))
@@ -96,14 +93,12 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     processed_count = 0
     all_processed_order_ids = set()
 
-    # Am schimbat 'settings.SHOPIFY_STORES' cu 'stores_to_sync'
     for s, orders_or_exception in zip(stores_to_sync, all_results):
         if isinstance(orders_or_exception, Exception):
             logging.warning(f"Eroare la preluarea comenzilor pentru {s.domain}: {orders_or_exception}")
             continue
 
         store_rec = existing_stores.get(s.domain)
-        # Verificarea de aici rămâne ca o plasă de siguranță, deși nu ar trebui să se întâmple
         if not store_rec:
             logging.warning(f"ORDER SYNC: Magazinul '{s.brand}' ({s.domain}) nu a fost găsit în BD, deși a fost sincronizat. Se adaugă automat.")
             store_rec = models.Store(name=s.brand, domain=s.domain)
@@ -221,4 +216,20 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     if all_processed_order_ids:
         logging.warning(f"Validare adrese și recalculare statusuri pentru {len(all_processed_order_ids)} comenzi...")
         orders_to_recalc_res = await db.execute(select(models.Order).options(joinedload(models.Order.shipments)).where(models.Order.id.in_(all_processed_order_ids)))
-        orders_to_recalc = orders_to_recalc_res.unique
+        orders_to_recalc = orders_to_recalc_res.unique().scalars().all()
+        for order in orders_to_recalc:
+            if order.address_status != 'valid':
+                await address_service.validate_address_for_order(db, order)
+            calculate_and_set_derived_status(order)
+
+    await db.commit()
+    await manager.broadcast({"type": "sync_end", "message": f"Sincronizare finalizată! {processed_count} comenzi actualizate."})
+    logging.warning(f"ORDER SYNC finalizat în {(datetime.now(timezone.utc) - start_ts).total_seconds():.1f}s.")
+
+async def run_couriers_sync(db: AsyncSession, full_sync: bool = False):
+    await courier_service.track_and_update_shipments(db, full_sync=full_sync)
+
+async def run_full_sync(db: AsyncSession, days: int):
+    """Rulează o sincronizare completă: comenzi și apoi curieri."""
+    await run_orders_sync(db, days, full_sync=True)
+    await run_couriers_sync(db, full_sync=True)

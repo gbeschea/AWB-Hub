@@ -1,114 +1,88 @@
-import io
+# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/services/couriers/sameday.py
+
+import httpx
 import logging
-import asyncio
-import json
-import time
-from typing import Optional
-from datetime import datetime, timezone
-from .base import BaseCourier, LabelResponse, TrackingResponse
+from typing import Optional, Dict, Any
+
 from settings import settings
+# MODIFICAT: Am schimbat 'CourierTracker' în 'BaseCourier'
+from .base import BaseCourier, TrackingStatus
 
-def _parse_sameday_date(date_str: Optional[str]) -> Optional[datetime]:
-    if not date_str: return None
-    try:
-        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-    except (ValueError, TypeError):
+# Cache simplu în memorie pentru token-ul Sameday
+sameday_token_cache: Dict[str, str] = {}
+
+async def login_sameday(account_key: str) -> Optional[str]:
+    """
+    Obține un token de autentificare de la Sameday.
+    """
+    if account_key in sameday_token_cache:
+        return sameday_token_cache[account_key]
+
+    if not settings.SAMEDAY_CONFIG:
+        logging.error("SAMEDAY_CONFIG nu este setat.")
+        return None
+        
+    creds = settings.SAMEDAY_CONFIG.get(account_key)
+    if not creds:
+        logging.error(f"Nu s-au găsit credențiale Sameday pentru account_key: {account_key}")
+        return None
+
+    url = f"{creds['base_url']}/api/authenticate"
+    payload = {"username": creds["username"], "password": creds["password"]}
+    
+    async with httpx.AsyncClient() as client:
         try:
-            return datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-        except (ValueError, TypeError):
-            return None
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            token = data.get("token")
+            if token:
+                sameday_token_cache[account_key] = token
+                return token
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Eroare HTTP la autentificare Sameday pentru {account_key}: {e.response.status_code}")
+        except Exception as e:
+            logging.error(f"Eroare la autentificare Sameday pentru {account_key}: {e}")
+            
+    return None
 
+async def track_awb(awb_number: str, account_key: str) -> Optional[TrackingStatus]:
+    """
+    Interoghează API-ul Sameday pentru a obține starea unui AWB.
+    """
+    token = await login_sameday(account_key)
+    if not token:
+        return None
+
+    creds = settings.SAMEDAY_CONFIG.get(account_key)
+    url = f"{creds['base_url']}/api/awb/track"
+    headers = {"X-Auth-Token": token}
+    payload = {"awb": awb_number}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Aici logica de parsare a răspunsului Sameday
+            raw_status = data.get("awbStatus", {}).get("statusLabel", "Unknown")
+            return TrackingStatus(
+                raw_status=raw_status,
+                derived_status="unknown" # Va trebui mapat
+            )
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Eroare HTTP la interogarea Sameday pentru AWB {awb_number}: {e.response.status_code}")
+        except Exception as e:
+            logging.error(f"Eroare la procesarea AWB Sameday {awb_number}: {e}")
+
+    return None
+
+# MODIFICAT: Am redenumit clasa în 'SamedayCourier' și moștenește 'BaseCourier'
 class SamedayCourier(BaseCourier):
-    _token: Optional[str] = None
-    _token_time: datetime = datetime.min
-    _token_lock = asyncio.Lock()
+    async def track(self, awb: str) -> Optional[TrackingStatus]:
+        return await track_awb(awb, self.account_key)
 
-    _last_request_time: float = 0.0
-    _rate_limit_interval: float = 0.3 # 1 request pe 1.1 secunde pentru siguranță
-    _rate_limit_lock = asyncio.Lock()
-
-    async def _apply_rate_limit(self):
-        """Așteaptă dacă este necesar pentru a respecta limita de request-uri."""
-        async with self._rate_limit_lock:
-            now = time.monotonic()
-            elapsed = now - self._last_request_time
-            if elapsed < self._rate_limit_interval:
-                await asyncio.sleep(self._rate_limit_interval - elapsed)
-            self._last_request_time = time.monotonic()
-
-    async def _get_token(self) -> Optional[str]:
-        """Obține și gestionează token-ul de autentificare Sameday, prevenind race conditions."""
-        async with self._token_lock:
-            if self._token and (datetime.now() - self._token_time).total_seconds() < 3600:
-                return self._token
-            
-            creds = settings.SAMEDAY_CREDS
-            if not creds:
-                logging.error("Credențialele Sameday nu sunt configurate.")
-                return None
-            try:
-                await self._apply_rate_limit()
-                r = await self.client.post(
-                    'https://api.sameday.ro/api/authenticate',
-                    headers={'X-AUTH-USERNAME': creds['username'], 'X-AUTH-PASSWORD': creds['password']}
-                )
-                if r.status_code == 200:
-                    self._token = (r.json() or {}).get('token')
-                    self._token_time = datetime.now()
-                    return self._token
-                
-                logging.error(f"Autentificare Sameday eșuată cu status {r.status_code}: {r.text}")
-                return None
-            except Exception as e:
-                logging.error(f"Eroare la obținerea token-ului Sameday: {e}")
-                return None
-
-    async def get_label(self, awb: str, account_key: Optional[str], paper_size: str) -> LabelResponse:
-        token = await self._get_token()
-        if not token:
-            return LabelResponse(success=False, error_message="Autentificare Sameday eșuată.")
-
-        valid_paper_size = paper_size.upper() if paper_size.upper() in ["A4", "A6"] else "A6"
-        url = f'https://api.sameday.ro/api/awb/download/{awb}/{valid_paper_size}'
-        try:
-            await self._apply_rate_limit()
-            r = await self.client.get(url, headers={'X-AUTH-TOKEN': token}, timeout=30, follow_redirects=True)
-            
-            if r.status_code == 200 and 'application/pdf' in r.headers.get('content-type', ''):
-                return LabelResponse(success=True, content=io.BytesIO(r.content))
-
-            try:
-                error_msg = r.json().get('message', 'Răspuns necunoscut')
-            except json.JSONDecodeError:
-                error_msg = "Răspuns neașteptat de la Sameday (HTML sau text primit în loc de PDF)."
-            
-            return LabelResponse(success=False, error_message=error_msg)
-
-        except Exception as e:
-            return LabelResponse(success=False, error_message=f"Excepție la descărcare etichetă Sameday: {e}")
-
-    async def track_awb(self, awb: str, account_key: Optional[str]) -> TrackingResponse:
-        token = await self._get_token()
-        if not token:
-            return TrackingResponse(status='Eroare Autentificare', date=None)
-
-        try:
-            await self._apply_rate_limit()
-            url = f'https://api.sameday.ro/api/client/awb/{awb}/status'
-            r = await self.client.get(url, headers={'X-AUTH-TOKEN': token}, timeout=15.0)
-            if r.status_code != 200:
-                return TrackingResponse(status=f'HTTP {r.status_code}', date=None)
-            
-            response_data = r.json()
-            history = response_data.get('expeditionHistory', [])
-            if not history:
-                return TrackingResponse(status='AWB Generat', date=None, raw_data=response_data)
-
-            latest_event = max(history, key=lambda event: _parse_sameday_date(event.get('statusDate')) or datetime.min.replace(tzinfo=timezone.utc))
-            status_label = latest_event.get('statusLabel', 'Status neclar')
-            status_date = _parse_sameday_date(latest_event.get('statusDate'))
-
-            return TrackingResponse(status=status_label, date=status_date, raw_data=response_data)
-        except Exception as e:
-            logging.error(f"Eroare la tracking Sameday pentru AWB {awb}: {e}")
-            return TrackingResponse(status='Eroare API', date=None)
+    async def create_awb(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        logging.warning("Funcționalitatea de creare AWB pentru Sameday nu este implementată.")
+        return None

@@ -1,38 +1,29 @@
-# services/couriers/base.py
+# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/services/couriers/base.py
+
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Dict
-from datetime import datetime
-import httpx
-import io
+from typing import Optional, Dict, Any, NamedTuple
 
-class LabelResponse(ABC):
-    """O clasă pentru a standardiza răspunsurile de la API-urile de etichete."""
-    def __init__(self, success: bool, content: Optional[io.BytesIO] = None, error_message: Optional[str] = None):
-        self.success = success
-        self.content = content
-        self.error_message = error_message
-
-class TrackingResponse(ABC):
-    """O clasă pentru a standardiza răspunsurile de la API-urile de tracking."""
-    def __init__(self, status: str, date: Optional[datetime], raw_data: Optional[Dict] = None):
-        self.status = status
-        self.date = date
-        self.raw_data = raw_data
+# ADĂUGAT: Clasa lipsă 'TrackingStatus'
+class TrackingStatus(NamedTuple):
+    """O structură standard pentru a stoca statusul unui AWB."""
+    raw_status: str
+    derived_status: str
+    details: Optional[str] = None
 
 class BaseCourier(ABC):
     """
-    Clasa de bază abstractă pentru toți curierii.
-    Definește 'contractul' pe care fiecare clasă de curier trebuie să îl implementeze.
+    Clasă de bază abstractă pentru toți curierii.
+    Definește interfața pe care fiecare clasă de curier trebuie să o implementeze.
     """
-    def __init__(self, client: httpx.AsyncClient):
-        self.client = client
+    def __init__(self, account_key: str):
+        self.account_key = account_key
 
     @abstractmethod
-    async def get_label(self, awb: str, account_key: Optional[str], paper_size: str) -> LabelResponse:
-        """Descarcă eticheta (PDF) pentru un AWB specific."""
-        raise NotImplementedError
+    async def track(self, awb: str) -> Optional[TrackingStatus]:
+        """Urmărește un AWB și returnează starea lui."""
+        pass
 
     @abstractmethod
-    async def track_awb(self, awb: str, account_key: Optional[str]) -> TrackingResponse:
-        """Returnează statusul curent pentru un AWB specific."""
-        raise NotImplementedError
+    async def create_awb(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Creează un AWB nou."""
+        pass

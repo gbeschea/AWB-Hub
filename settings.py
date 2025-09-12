@@ -9,26 +9,16 @@ from pathlib import Path
 class ShopifyStore(BaseModel):
     brand: str
     domain: str
-    api_key: str
+    access_token: str # MODIFICAT: Am redenumit din 'api_key'
     shared_secret: str
     api_version: str = "2024-04"
 
 def json_config_settings_source(settings: BaseSettings) -> Dict[str, Any]:
-    """
-    O sursă de setări care încarcă variabile dintr-un fișier JSON
-    specificat în câmpul `config_file` al modelului de setări.
-    """
-    config_file = getattr(settings.__class__.model_config, 'config_file', None)
-    if config_file:
-        config_path = Path(config_file)
-        if config_path.is_file():
-            return json.loads(config_path.read_text('utf-8'))
     return {}
 
 class Settings(BaseSettings):
     DATABASE_URL: str
     
-    SHOPIFY_STORES: Optional[List[ShopifyStore]] = None 
     COURIER_MAP: Optional[Dict[str, str]] = None
     PAYMENT_MAP: Optional[Dict[str, List[str]]] = None
     COURIER_STATUS_MAP: Optional[Dict[str, Dict[str, List[str]]]] = None
@@ -78,12 +68,6 @@ def load_json_config(file_path: str) -> Any:
 settings.COURIER_MAP = load_json_config('config/courier_map.json')
 settings.PAYMENT_MAP = load_json_config('config/payment_map.json')
 settings.COURIER_STATUS_MAP = load_json_config('config/courier_status_map.json')
-
-# MODIFICAT: Aici parsăm dicționarele în obiecte ShopifyStore
-shopify_stores_data = load_json_config('config/shopify_stores.json')
-if shopify_stores_data:
-    settings.SHOPIFY_STORES = [ShopifyStore.model_validate(s) for s in shopify_stores_data]
-
 settings.SAMEDAY_CONFIG = load_json_config('config/sameday.json')
-settings.DPD_CONFIG = load_json_config('config/dpd.json')
+settings.DPD_CONFIG = load_json_config('config/dpd.json') 
 settings.ECONT_CONFIG = load_json_config('config/econt.json')

@@ -1,51 +1,56 @@
-import io
-import json
-from typing import Optional
-from datetime import datetime
-from .base import BaseCourier, LabelResponse, TrackingResponse
+# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/services/couriers/dpd.py
+
+import httpx
+import logging
+from typing import Optional, Dict, Any
+
 from settings import settings
+# MODIFICAT: Am schimbat 'CourierTracker' în 'BaseCourier'
+from .base import BaseCourier, TrackingStatus
 
-API_BASE_DPD = 'https://api.dpd.ro/v1'
+async def track_awb(awb_number: str, account_key: str) -> Optional[TrackingStatus]:
+    if not settings.DPD_CONFIG:
+        logging.error("DPD_CONFIG nu este setat.")
+        return None
 
-class DPDCourier(BaseCourier):
-    async def get_label(self, awb: str, account_key: Optional[str], paper_size: str) -> LabelResponse:
-        creds = settings.DPD_CREDS.get(account_key)
-        if not creds:
-            return LabelResponse(success=False, error_message=f"Nu s-au găsit credențiale DPD pentru contul: {account_key}")
+    creds = settings.DPD_CONFIG.get(account_key)
+    if not creds:
+        logging.error(f"Nu s-au găsit credențiale DPD pentru account_key: {account_key}")
+        return None
 
-        body = {'userName': creds['username'], 'password': creds['password'], 'paperSize': paper_size, 'parcels': [{'parcel': {'id': awb}}]}
+    url = f"{creds['base_url']}/tracking?type=3&doc_id={awb_number}&cons_type=0&lang=ro"
+    headers = {
+        'User-Agent': creds['user_agent'],
+        'Cookie': f"user_lang=ro_RO; lang=ro_RO; auth={creds['auth_token']}"
+    }
+
+    async with httpx.AsyncClient() as client:
         try:
-            r = await self.client.post(f'{API_BASE_DPD}/print', json=body, timeout=45)
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+
+            if not data or not data.get('status'):
+                return None
             
-            if r.status_code == 200 and 'application/pdf' in r.headers.get('content-type', ''):
-                return LabelResponse(success=True, content=io.BytesIO(r.content))
-            
-            try:
-                error_msg = r.json().get('error', {}).get('message', 'Răspuns necunoscut')
-            except json.JSONDecodeError:
-                error_msg = "Răspuns neașteptat de la DPD (HTML sau text primit în loc de PDF)."
-            
-            return LabelResponse(success=False, error_message=f"Eroare DPD: {error_msg}")
-            
+            raw_status = data['status']
+            return TrackingStatus(
+                raw_status=raw_status,
+                derived_status="unknown"
+            )
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Eroare HTTP la interogarea DPD pentru AWB {awb_number}: {e.response.status_code}")
         except Exception as e:
-            return LabelResponse(success=False, error_message=f"Excepție la generare etichetă DPD: {e}")
-
-    async def track_awb(self, awb: str, account_key: Optional[str]) -> TrackingResponse:
-        creds = settings.DPD_CREDS.get(account_key)
-        if not creds:
-            return TrackingResponse(status='Cont Necunoscut', date=None)
-
-        body = {'userName': creds['username'], 'password': creds['password'], 'language': 'EN', 'parcels': [{'id': awb}]}
-        try:
-            r = await self.client.post(f'{API_BASE_DPD}/track/', json=body, timeout=15.0)
-            if r.status_code != 200:
-                return TrackingResponse(status=f'HTTP {r.status_code}', date=None)
+            logging.error(f"Eroare la procesarea AWB DPD {awb_number}: {e}")
             
-            data = (r.json() or {}).get('parcels', [{}])[0]
-            operations = data.get('operations', [])
-            last_op = operations[-1] if operations else {}
-            last_desc = (last_op.get('description') or 'N/A').strip()
-            last_dt = datetime.fromisoformat(last_op['date'].replace('Z', '+00:00')) if last_op.get('date') else None
-            return TrackingResponse(status=last_desc, date=last_dt, raw_data=data)
-        except Exception:
-            return TrackingResponse(status='Eroare API', date=None)
+    return None
+
+# MODIFICAT: Am redenumit clasa în 'DPDCourier' și moștenește 'BaseCourier'
+class DPDCourier(BaseCourier):
+    async def track(self, awb: str) -> Optional[TrackingStatus]:
+        return await track_awb(awb, self.account_key)
+
+    async def create_awb(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        # Aici va veni logica pentru crearea AWB-ului la DPD
+        logging.warning("Funcționalitatea de creare AWB pentru DPD nu este implementată.")
+        return None
