@@ -2,7 +2,7 @@ import base64
 import hashlib
 import hmac
 import logging
-from typing import Dict, Any
+from typing import Dict, Any # <-- MODIFICAREA ESTE AICI
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Header, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from sqlalchemy import select
 import models
 from database import get_db
 from services import webhook_service
+
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 

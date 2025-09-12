@@ -3,7 +3,9 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float, Table, 
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
-from sqlalchemy.sql import func # NOU: Import pentru funcția NOW()
+from sqlalchemy.sql import func
+from database import Base # This line might already exist
+
 
 # --- Hărți pentru relații Many-to-Many ---
 
@@ -38,8 +40,10 @@ class Store(Base):
   id = Column(Integer, primary_key=True)
   name = Column(String(255))
   domain = Column(String(255), unique=True)
-  # NOU: Adăugăm secretul pentru validarea webhook-urilor
   shared_secret = Column(String(255), nullable=True)
+  access_token = Column(String(255), nullable=True)
+  has_pii_access = Column(Boolean, default=True, nullable=False)
+  is_active = Column(Boolean, default=True, nullable=False)
   last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
   orders = relationship('Order', back_populates='store')
   categories = relationship("StoreCategory", secondary=store_category_map, back_populates="stores")

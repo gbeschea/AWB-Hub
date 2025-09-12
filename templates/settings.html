@@ -1,23 +1,31 @@
 {% extends "_layout.html" %}
-
 {% block title %}Setări - AWB Hub{% endblock %}
 
 {% block content %}
-    <h1 style="margin-bottom: 2rem;">Setări Generale</h1>
+    <h1 style="margin-bottom: 2rem;">⚙️ Setări Generale</h1>
+    <p>Alege o secțiune pentru a o configura.</p>
+
     <div class="grid">
         <article>
             <hgroup>
-                <h2>Categorii Magazine</h2>
-                <p>Grupează magazinele Shopify în categorii pentru o mai bună organizare și printare în loturi.</p>
+                <h2>🏬 Magazine</h2>
+                <p>Adaugă, editează sau dezactivează magazinele Shopify conectate.</p>
             </hgroup>
-            <a href="{{ url_for('get_categories_page') }}" role="button">Gestionează</a>
+            <a href="{{ url_for('get_stores_page') }}" role="button">Gestionează Magazinele</a>
         </article>
         <article>
             <hgroup>
-                <h2>Categorii Curieri</h2>
-                <p>Grupează conturile de curieri (DPD, Sameday etc.) în categorii logice.</p>
+                <h2>📇 Categorii Magazine</h2>
+                <p>Grupează magazinele în categorii pentru o mai bună organizare.</p>
             </hgroup>
-            <a href="{{ url_for('get_courier_categories_page') }}" role="button">Gestionează</a>
+            <a href="{{ url_for('get_categories_page') }}" role="button">Gestionează Categoriile</a>
+        </article>
+        <article>
+            <hgroup>
+                <h2>🚚 Categorii Curieri</h2>
+                <p>Grupează conturile de curieri și configurează link-urile de tracking.</p>
+            </hgroup>
+            <a href="{{ url_for('get_courier_categories_page') }}" role="button">Gestionează Curierii</a>
         </article>
     </div>
 {% endblock %}

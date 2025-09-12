@@ -3,7 +3,8 @@ import logging
 import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
-from settings import ShopifyStore
+from settings import ShopifyStore, settings
+import models
 
 
 async def fetch_orders_graphql(store: ShopifyStore, since_days: int) -> List[Dict[str, Any]]:
@@ -247,3 +248,37 @@ async def notify_shopify_of_shipment(store_cfg: ShopifyStore, order_gid: str, fu
         return await _update_existing_fulfillment(store_cfg, fulfillment_gid, tracking_info)
     else:
         return await _create_fulfillment_from_order(store_cfg, order_gid, tracking_info)
+    
+class ShopifyAdminAPI:
+    """A client to interact with the Shopify Admin REST API."""
+    def __init__(self, store: models.Store):
+        store_config = next((s for s in settings.SHOPIFY_STORES if s.domain == store.domain), None)
+        if not store_config:
+            raise ValueError(f"Store config not found for {store.domain}")
+        
+        self.base_url = f"https://{store.domain}/admin/api/{store_config.api_version}"
+        self.headers = {"X-Shopify-Access-Token": store_config.access_token}
+
+    async def get_existing_webhooks(self) -> List[Dict[str, Any]]:
+        """Fetches all currently registered webhooks for the store."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(f"{self.base_url}/webhooks.json", headers=self.headers)
+                response.raise_for_status()
+                return response.json().get("webhooks", [])
+            except httpx.HTTPStatusError as e:
+                logging.error(f"Failed to get webhooks for {self.base_url}: {e.response.text}")
+                return []
+
+    async def create_webhook(self, topic: str, address: str) -> bool:
+        """Creates a new webhook subscription."""
+        payload = {"webhook": {"topic": topic, "address": address, "format": "json"}}
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(f"{self.base_url}/webhooks.json", headers=self.headers, json=payload)
+                response.raise_for_status()
+                logging.info(f"Successfully created webhook '{topic}' for {self.base_url}")
+                return True
+            except httpx.HTTPStatusError as e:
+                logging.error(f"Failed to create webhook '{topic}' for {self.base_url}: {e.response.text}")
+                return False
