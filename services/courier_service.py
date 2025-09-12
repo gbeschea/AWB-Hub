@@ -1,3 +1,5 @@
+# services/courier_service.py
+
 import asyncio
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,7 @@ from .couriers.common import TrackingStatus
 from .couriers import get_courier_service
 
 def map_status(raw_status: str, account_key: str) -> str:
+    # Funcția map_status rămâne neschimbată
     raw_status_lower = raw_status.lower().strip()
     courier_name = account_key.lower() if account_key else ''
     if settings.COURIER_STATUS_MAP:
@@ -23,27 +26,21 @@ def map_status(raw_status: str, account_key: str) -> str:
     if "retur" in raw_status_lower or "return" in raw_status_lower: return "retur"
     return "in_tranzit"
 
-# MODIFICARE: Am redenumit parametrul în 'courier_credentials' pentru claritate
-async def other_worker(shipment: models.Shipment, courier_type: str, courier_credentials: Dict[str, Any]):
-    """Worker function to track a single AWB."""
-    # Trimitem 'courier_credentials' mai departe
-    courier_service = get_courier_service(courier_type, shipment.account_key, courier_credentials)
+# Worker-ul primește serviciul gata creat
+async def worker(courier_service, shipment: models.Shipment):
     if not courier_service:
-        logging.warning(f"Nu s-a găsit/putut crea serviciu de curierat pentru tipul '{courier_type}' (AWB: {shipment.awb})")
-        return None, shipment.id, courier_type
+        return None, shipment.id
     try:
         response: TrackingStatus = await courier_service.track(shipment.awb)
-        return response, shipment.id, courier_type
+        return response, shipment.id
     except Exception as e:
-        logging.error(f"Eroare la tracking pentru AWB {shipment.awb} ({courier_type}): {e}")
-        return None, shipment.id, courier_type
+        logging.error(f"Eroare la tracking pentru AWB {shipment.awb}: {e}")
+        return None, shipment.id
 
 async def track_and_update_shipments(db: AsyncSession, full_sync: bool = False):
-    """Tracks all non-final shipments and updates their status in the database."""
     logging.warning("COURIER SYNC a pornit.")
     final_statuses = ["livrat", "refuzat", "retur"]
     
-    # MODIFICARE: Folosim 'credentials' în loc de 'settings'
     query = (
         select(models.Shipment, models.CourierAccount.courier_type, models.CourierAccount.credentials)
         .join(models.CourierAccount, models.Shipment.account_key == models.CourierAccount.account_key)
@@ -52,8 +49,6 @@ async def track_and_update_shipments(db: AsyncSession, full_sync: bool = False):
             models.Shipment.derived_status.is_(None)
         ))
     )
-    if not full_sync: pass
-
     result = await db.execute(query)
     shipments_and_details: List[Tuple[models.Shipment, str, Dict[str, Any]]] = result.all()
 
@@ -61,12 +56,28 @@ async def track_and_update_shipments(db: AsyncSession, full_sync: bool = False):
         logging.warning("Nu există AWB-uri de urmărit.")
         return
 
-    all_tasks = [other_worker(sh, c_type, c_credentials) for sh, c_type, c_credentials in shipments_and_details]
+    # --- LOGICA NOUĂ: Creăm o singură instanță de serviciu per cont ---
+    service_instances = {}
+    all_tasks = []
+    
+    for shipment, courier_type, credentials in shipments_and_details:
+        account_key = shipment.account_key
+        if account_key not in service_instances:
+            # Creăm serviciul o singură dată pentru fiecare cont
+            service_instances[account_key] = get_courier_service(
+                courier_type, account_key, credentials
+            )
+        
+        courier_service = service_instances[account_key]
+        all_tasks.append(worker(courier_service, shipment))
+    # --- SFÂRȘIT LOGICĂ NOUĂ ---
+
     shipment_map = {sh.id: sh for sh, _, _ in shipments_and_details}
     results = await tqdm.gather(*all_tasks, desc="Verificare status AWB-uri")
 
     updated_count = 0
-    for response, shipment_id, courier_type in results:
+    # Despachetarea rezultatului este acum mai simplă
+    for response, shipment_id in results:
         if response and shipment_id:
             shipment = shipment_map.get(shipment_id)
             if shipment:

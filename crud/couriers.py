@@ -13,7 +13,6 @@ async def get_courier_account(db: AsyncSession, account_id: int):
     result = await db.execute(select(CourierAccount).where(CourierAccount.id == account_id))
     return result.scalar_one_or_none()
 
-
 async def create_courier_account(db: AsyncSession, name: str, account_key: str, courier_type: str, tracking_url: str, credentials: dict):
     new_account = CourierAccount(
         name=name, account_key=account_key, courier_type=courier_type,
@@ -22,7 +21,8 @@ async def create_courier_account(db: AsyncSession, name: str, account_key: str, 
     db.add(new_account)
     await db.commit()
 
-async def update_courier_account(db: AsyncSession, account_id: int, name: str, account_key: str, courier_type: str, tracking_url: str, credentials_json: str, is_active: bool):
+# MODIFICARE AICI: Am corectat numele parametrului
+async def update_courier_account(db: AsyncSession, account_id: int, name: str, account_key: str, courier_type: str, tracking_url: str, credentials: dict, is_active: bool):
     result = await db.execute(select(CourierAccount).where(CourierAccount.id == account_id))
     account = result.scalar_one_or_none()
     if account:
@@ -30,7 +30,8 @@ async def update_courier_account(db: AsyncSession, account_id: int, name: str, a
         account.account_key = account_key
         account.courier_type = courier_type
         account.tracking_url = tracking_url
-        account.credentials = credentials # Modificat
+        # Acum, această linie este corectă
+        account.credentials = credentials 
         account.is_active = is_active
         await db.commit()
 
