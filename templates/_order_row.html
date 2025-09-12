@@ -1,0 +1,81 @@
+{% set latest_shipment = order.latest_shipment %}
+{% set awb = latest_shipment.awb if latest_shipment else '' %}
+
+{% set status_text = order.derived_status or 'N/A' %}
+{% set status_class = "status-" + status_text.lower().replace(" ", "-").replace("(", "").replace(")", "").replace(":", "").replace("🚦", "").replace("📦", "").replace("✈️", "").replace("⏰", "").replace("🚚", "").replace("✅", "").replace("❌", "").replace("❔", "") %}
+
+<tr>
+  <td data-column-key="selector">
+    {% if awb %}<input type="checkbox" name="awbs" value="{{ awb }}" class="awb-checkbox" id="awb_{{ awb }}">{% endif %}
+  </td>
+  <td data-column-key="comanda">
+    <strong>{{ order.name }}</strong>
+    {% if order.note %}
+    <div class="order-notes-wrapper">
+        <svg class="order-notes-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25ZM2 4.75A.75.75 0 0 1 2.75 4h3.5a.75.75 0 0 1 0 1.5h-3.5A.75.75 0 0 1 2 4.75Zm0 4A.75.75 0 0 1 2.75 8h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8.75Z"></path></svg>
+        <div class="order-notes-tooltip">
+            <strong>Comentarii:</strong><br>{{ order.note }}
+        </div>
+    </div>
+    {% endif %}
+  </td>
+  <td data-column-key="data"><small>{{ (order.created_at | localtime).strftime('%d-%m-%Y %H:%M') if order.created_at }}</small></td>
+  <td data-column-key="status">
+    <span class="status-badge {{ status_class }}">{{ status_text }}</span>
+  </td>
+  <td data-column-key="payment_status">
+      <span class="status-badge status-{{ order.financial_status | replace('_', '-') }}">{{ order.financial_status | replace('_', ' ') | capitalize }}</span>
+  </td>
+  <td data-column-key="fulfillment_status">
+      <span class="status-badge status-{{ order.shopify_status | replace('_', '-') }}">{{ order.shopify_status | replace('_', ' ') | capitalize }}</span>
+  </td>
+  <td data-column-key="produse"><small>{{ order.line_items_str | truncate(35) }}</small></td>
+<td data-column-key="awb">
+    {% if order.shipments|length > 1 %}
+        <details class="awb-dropdown">
+            <summary>
+                {{ awb }}
+                {# Aici afișăm statusul BRUT al ultimului AWB #}
+                {% if latest_shipment and latest_shipment.last_status %}
+                    <br><small><em>{{ latest_shipment.last_status }}</em></small>
+                {% endif %}
+            </summary>
+            <ul>
+                {% for shipment in order.shipments|sort(attribute='fulfillment_created_at', reverse=True) %}
+                    <li>
+                      <small>
+                          <strong>AWB:</strong> {{ shipment.awb or 'N/A' }}<br>
+                          <strong>Curier:</strong> {{ shipment.courier or 'N/A' }}<br>
+                          <strong>Status:</strong> <em>{{ shipment.last_status or 'N/A' }}</em>
+                      </small>
+                    </li>
+                {% endfor %}
+            </ul>
+        </details>
+    {% else %}
+        {% set template = courier_tracking_map.get(latest_shipment.courier) %}
+        {% if awb and template %}
+            <a href="{{ template.replace('{awb}', awb) }}" target="_blank">{{ awb }}</a>
+        {% else %}
+            {{ awb }}
+        {% endif %}
+        {# Și aici afișăm statusul BRUT al AWB-ului unic #}
+        {% if latest_shipment and latest_shipment.last_status %}
+            <br><small><em>{{ latest_shipment.last_status }}</em></small>
+        {% endif %}
+    {% endif %}
+</td>
+<td data-column-key="status_curier">
+  <small>{{ order.mapped_courier_status or '' }}</small>
+</td>
+  <td data-column-key="printat">
+      {% if latest_shipment and awb %}
+          {% if latest_shipment.printed_at %}<span class="status-badge status-printat">Printat</span>
+          {% else %}<span class="status-badge status-neprintat">Neprintat</span>{% endif %}
+      {% endif %}
+  </td>
+  <td data-column-key="printat_la"><small>{{ (latest_shipment.printed_at | localtime).strftime('%d-%m-%Y %H:%M') if latest_shipment and latest_shipment.printed_at }}</small></td>
+  <td data-column-key="actiuni">
+      {% if awb %}<a href="{{ url_for('download_single_label', awb=awb) }}" role="button" class="secondary outline" style="padding: 2px 1rem; font-size: 0.8em;">AWB</a>{% endif %}
+  </td>
+</tr>
