@@ -9,17 +9,18 @@ from .common import BaseCourierService, TrackingStatus
 class SamedayCourierService(BaseCourierService):
     """Sameday AWB Tracking Service."""
 
-    # MODIFICARE: Constructorul primește acum un dicționar 'settings'
+    # MODIFICARE AICI
     def __init__(self, account_key: str, settings: dict):
-        super().__init__(account_key)
-        # Acreditările sunt luate din dicționar, nu din fișierul global
-        self.username = settings.get('username')
-        self.password = settings.get('password')
+        # MODIFICARE: Trimitem ambii parametri la clasa părinte
+        super().__init__(account_key, settings) 
+        
+        self.username = self.settings.get('username')
+        self.password = self.settings.get('password')
         self.api_url = "https://api.sameday.ro"
 
-        # Validare esențială pentru a preveni erorile
         if not self.username or not self.password:
             raise ValueError("Username and password are required for Sameday service.")
+
 
     async def track(self, awb: str) -> Optional[TrackingStatus]:
         headers = {}

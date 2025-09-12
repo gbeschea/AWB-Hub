@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 from .common import BaseCourierService 
 from .sameday import SamedayCourierService
 from .dpd import DPDCourierService
+import logging
 
 COURIER_MAP = {
     "sameday": SamedayCourierService,

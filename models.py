@@ -168,26 +168,22 @@ class CourierAccount(Base):
     __tablename__ = 'courier_accounts'
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    account_key = Column(String, unique=True, nullable=False, index=True)
-    courier_type = Column(String, nullable=False)
-    client_id = Column(String)
-    username = Column(String) # Poate fi considerat "legacy", acum folosim 'settings'
-    password = Column(String) # Poate fi considerat "legacy", acum folosim 'settings'
-    is_active = Column(Boolean, default=True)
-
-    # MODIFICARE: Am adăugat coloana 'settings' pentru a stoca acreditările
-    settings = Column(JSONB)
-
-    # Relația cu CourierMapping (dacă nu există deja, adaug-o)
+    name = Column(String(255), nullable=False)
+    account_key = Column(String(64), unique=True, nullable=False, index=True)
+    courier_type = Column(String(64), nullable=False, index=True)
+    tracking_url = Column(String(512), nullable=True)
+    credentials = Column(JSONB, nullable=True) # Am setat nullable=True pentru flexibilitate
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Adăugăm relația către CourierMapping
     mappings = relationship("CourierMapping", back_populates="account")
-
 
 class CourierMapping(Base):
     __tablename__ = 'courier_mappings'
+
     id = Column(Integer, primary_key=True)
     shopify_name = Column(String(255), unique=True, nullable=False, index=True)
     account_key = Column(String(64), ForeignKey('courier_accounts.account_key'), nullable=False)
-
-    # MODIFICARE: Am adăugat relația inversă către CourierAccount
-    account = relationship("CourierAccount")
+    
+    # Adăugăm relația inversă către CourierAccount
+    account = relationship("CourierAccount", back_populates="mappings")
