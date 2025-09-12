@@ -10,6 +10,7 @@ class ShopifyStore(BaseModel):
     brand: str
     domain: str
     access_token: str # MODIFICAT: Am redenumit din 'api_key'
+    pii_source: str  # ADĂUGAT
     shared_secret: str
     api_version: str = "2024-04"
 

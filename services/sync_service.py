@@ -75,8 +75,8 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
             brand=db_store.name,
             domain=db_store.domain,
             shared_secret=db_store.shared_secret,
-            # MODIFICAT: Am schimbat 'api_key' în 'access_token' pentru a se potrivi cu modelul
             access_token=db_store.access_token,
+            pii_source=db_store.pii_source,
             api_version="2024-04"
         ) for db_store in stores_from_db
     ]
