@@ -7,87 +7,105 @@ from settings import ShopifyStore, settings
 import models
 
 
-async def fetch_orders_graphql(store: ShopifyStore, since_days: int) -> List[Dict[str, Any]]:
-    """Prelucrează comenzile folosind API-ul GraphQL pentru date mai precise."""
-    api_version = store.api_version
-    domain = store.domain
-    token = store.access_token
-    url = f"https://{domain}/admin/api/{api_version}/graphql.json"
-    headers = {'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'}
-
-    created_at_min = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
-
-    # --- START MODIFICATION ---
-    # Am eliminat toate filtrele de status, lăsând doar filtrul de dată.
-    # Aceasta este cea mai inclusivă interogare posibilă.
-    api_query_string = f"created_at:>{created_at_min}"
-    # --- END MODIFICATION ---
-
-    query = """
-    query($first: Int!, $query: String, $cursor: String) {
-      orders(first: $first, query: $query, after: $cursor, sortKey: CREATED_AT, reverse: false) {
-        pageInfo { hasNextPage, endCursor }
-        edges {
-          node {
-            id, name, createdAt, tags, note,
-            cancelledAt,
-            displayFinancialStatus,
-            displayFulfillmentStatus,
-            totalPriceSet { shopMoney { amount } },
-            paymentGatewayNames,
-            shippingAddress { name, address1, address2, phone, city, zip, province, country },
-            lineItems(first: 20) { edges { node { sku, title, quantity } } },
-            fulfillments(first: 5) {
-              id, status,
-              trackingInfo { company, number, url },
-              createdAt,
-              updatedAt
-            },
-            fulfillmentOrders(first: 5) {
-              edges {
-                node { id, status, fulfillmentHolds { reason, reasonNotes } }
-              }
+async def fetch_orders(store: ShopifyStore, since_days: int) -> list:
+    since_date = datetime.now(timezone.utc) - timedelta(days=since_days)
+    since_str = since_date.isoformat()
+    
+    # MODIFICARE: Construim dinamic partea de query pentru adresa de livrare
+    shipping_address_query_part = ""
+    if store.pii_source == 'shopify':
+        logging.warning(f"Se preiau datele PII din Shopify pentru {store.domain}")
+        shipping_address_query_part = """
+            shippingAddress {
+                address1
+                address2
+                city
+                country
+                name
+                phone
+                province
+                zip
             }
-          }
-        }
-      }
-    }
+        """
+
+    # Query-ul este acum formatat dinamic
+    query = f"""
+    {{
+        orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>{since_str}") {{
+            edges {{
+                node {{
+                    id
+                    name
+                    createdAt
+                    cancelledAt
+                    displayFinancialStatus
+                    displayFulfillmentStatus
+                    tags
+                    note
+                    totalPriceSet {{
+                        shopMoney {{
+                            amount
+                        }}
+                    }}
+                    paymentGatewayNames
+                    {shipping_address_query_part}
+                    lineItems(first: 50) {{
+                        edges {{
+                            node {{
+                                sku
+                                title
+                                quantity
+                            }}
+                        }}
+                    }}
+                    fulfillments {{
+                        createdAt
+                        trackingInfo {{
+                            company
+                            number
+                            url
+                        }}
+                        id
+                    }}
+                    fulfillmentOrders(first: 10) {{
+                        edges {{
+                            node {{
+                                status
+                                fulfillmentHolds {{
+                                    reason
+                                    reasonNotes
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }}
+    }}
     """
+    
+    url = f"https://{store.domain}/admin/api/{store.api_version}/graphql.json"
+    headers = {
+        "X-Shopify-Access-Token": store.access_token,
+        "Content-Type": "application/graphql",
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, data=query, headers=headers, timeout=60.0)
+            response.raise_for_status()
+            data = response.json()
+            if "errors" in data:
+                logging.error(f"Eroare GraphQL pentru {store.domain}: {data['errors']}")
+                return []
+            return [edge["node"] for edge in data.get("data", {}).get("orders", {}).get("edges", [])]
+        except httpx.HTTPStatusError as e:
+            logging.error(f"Eroare HTTP la preluarea comenzilor pentru {store.domain}: {e.response.status_code} - {e.response.text}")
+        except Exception as e:
+            logging.error(f"Eroare neașteptată la preluarea comenzilor pentru {store.domain}: {e}")
+            
+    return []
 
-    all_orders = []
-    has_next_page = True
-    cursor = None
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        while has_next_page:
-            variables = { "first": 100, "query": api_query_string, "cursor": cursor }
-            try:
-                r = await client.post(url, json={'query': query, 'variables': variables}, headers=headers)
-                r.raise_for_status()
-                data = r.json()
-
-                if "errors" in data:
-                    logging.error(f"Eroare GraphQL pentru {domain}: {data['errors']}")
-                    break
-
-                orders_data = data.get("data", {}).get("orders", {})
-                for edge in orders_data.get("edges", []):
-                    all_orders.append(edge["node"])
-
-                page_info = orders_data.get("pageInfo", {})
-                has_next_page = page_info.get("hasNextPage", False)
-                cursor = page_info.get("endCursor")
-
-            except httpx.HTTPStatusError as e:
-                logging.error(f"Eroare API Shopify (GraphQL) pentru {domain}: {e.response.status_code} - {e.response.text}")
-                break
-            except Exception as e:
-                logging.error(f"Excepție neașteptată la preluarea comenzilor GraphQL pentru {domain}: {e}", exc_info=True)
-                break
-
-    return all_orders
-
-fetch_orders = fetch_orders_graphql
 
 async def get_open_fulfillment_order_id(store_cfg: ShopifyStore, order_gid: str) -> Optional[str]:
     """Interoghează Shopify pentru a găsi ID-ul primului FulfillmentOrder deschis."""

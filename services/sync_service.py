@@ -77,7 +77,7 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
             shared_secret=db_store.shared_secret,
             access_token=db_store.access_token,
             pii_source=db_store.pii_source,
-            api_version="2024-04"
+            api_version="2025-07"
         ) for db_store in stores_from_db
     ]
     

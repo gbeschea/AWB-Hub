@@ -143,6 +143,7 @@ class Shipment(Base):
   printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
   last_status = Column(String(255), nullable=True, index=True)
   last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  derived_status = Column(String(255), nullable=True, index=True) 
   order = relationship('Order', back_populates='shipments')
 
 class FulfillmentOrder(Base):
