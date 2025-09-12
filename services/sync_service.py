@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy.orm import joinedload
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import models
@@ -41,48 +41,32 @@ def map_payment_method(gateways: List[str], financial_status: str) -> str:
 
     return ", ".join(raw_gateways)
 
+
 async def courier_from_shopify(db: AsyncSession, tracking_company: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Map a tracking company string to our courier and account keys using the database.
-    It first tries an exact match, then falls back to a partial match.
+    Map a tracking company string from Shopify to our specific courier account.
+    This uses the CourierMapping table for a case-insensitive, exact match.
     """
     search_text = (tracking_company or '').strip()
     if not search_text:
         return None, None
 
-    # --- Pasul 1: Caută o potrivire directă (ca înainte) ---
-    exact_match_res = await db.execute(
-        select(models.CourierMapping).where(models.CourierMapping.shopify_name == search_text)
+    # MODIFICARE: Folosim func.lower() pentru o comparație case-insensitive
+    stmt = (
+        select(models.CourierMapping)
+        .options(joinedload(models.CourierMapping.account))
+        .where(func.lower(models.CourierMapping.shopify_name) == search_text.lower())
     )
-    exact_mapping = exact_match_res.scalar_one_or_none()
+    result = await db.execute(stmt)
+    mapping = result.scalar_one_or_none()
 
-    if exact_mapping:
-        acc_res = await db.execute(
-            select(models.CourierAccount).where(models.CourierAccount.account_key == exact_mapping.account_key)
-        )
-        account = acc_res.scalar_one_or_none()
-        if account:
-            return account.courier_type, account.account_key
+    if mapping and mapping.account and mapping.account.is_active:
+        logging.info(f"Mapare găsită pentru '{search_text}'. Folosim contul: {mapping.account.account_key} ({mapping.account.courier_type})")
+        return mapping.account.courier_type, mapping.account.account_key
 
-    # --- Pasul 2: Fallback la potrivire parțială (LOGICA NOUĂ) ---
-    # Preluăm toate conturile active de curier
-    all_accounts_res = await db.execute(
-        select(models.CourierAccount).where(models.CourierAccount.is_active == True)
-    )
-    all_accounts = all_accounts_res.scalars().all()
-
-    # Căutăm un cont al cărui 'courier_type' se regăsește în numele de la Shopify
-    search_text_lower = search_text.lower()
-    for account in all_accounts:
-        if account.courier_type.lower() in search_text_lower:
-            # Am găsit o potrivire (ex: 'dpd' în 'dpd pixelwave')
-            # Returnăm primul cont găsit de acest tip.
-            logging.info(f"Potrivire parțială găsită pentru '{search_text}'. Folosim contul: {account.account_key}")
-            return account.courier_type, account.account_key
-
-    # Dacă nu am găsit nimic, afișăm avertismentul
-    logging.warning(f"Nu s-a găsit nicio mapare (nici directă, nici parțială) pentru curierul: '{search_text}'")
+    logging.warning(f"Nu s-a găsit nicio mapare exactă și activă pentru curierul: '{search_text}'")
     return None, None
+
 
 
 def _get_mapped_address(order_data: Dict[str, Any], pii_source: str) -> Dict[str, Any]:
@@ -237,6 +221,36 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
             else:
                 for key, value in order_data.items():
                     setattr(order, key, value)
+            if order.fulfillment_orders:
+                for fo in order.fulfillment_orders:
+                    await db.delete(fo)
+                await db.flush()
+
+            for ff_order_edge in fulfillment_orders:
+                ff_order_node = ff_order_edge.get('node', {})
+                if not ff_order_node:
+                    continue
+                
+                # Căutăm să vedem dacă există deja, deși le-am șters mai sus (extra siguranță)
+                ff_order_id = ff_order_node.get('id')
+                existing_ff_order_res = await db.execute(
+                    select(models.FulfillmentOrder).where(models.FulfillmentOrder.shopify_fulfillment_order_id == ff_order_id)
+                )
+                existing_ff_order = existing_ff_order_res.scalar_one_or_none()
+
+                hold_details = ff_order_node.get('fulfillmentHolds')
+
+                if not existing_ff_order:
+                    db.add(models.FulfillmentOrder(
+                        order_id=order.id,
+                        shopify_fulfillment_order_id=ff_order_id,
+                        status=ff_order_node.get('status'),
+                        hold_details=hold_details
+                    ))
+                else:
+                    existing_ff_order.status = ff_order_node.get('status')
+                    existing_ff_order.hold_details = hold_details
+            # --- SFÂRȘITUL BLOCULUI DE COD ADĂUGAT ---
 
             ffs = o.get('fulfillments', [])
             if ffs:
@@ -251,6 +265,8 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
                     fulfillment_date = _dt(f.get('createdAt'))
                     # Mai întâi, apelăm funcția și obținem cheia contului
                     courier_type, account_key = await courier_from_shopify(db, tracking_info.get('company', ''))
+
+
 
                     # Căutăm dacă există deja o înregistrare
                     shipment_res = await db.execute(select(models.Shipment).where(models.Shipment.awb == awb))

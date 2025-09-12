@@ -22,6 +22,8 @@ store_category_map = Table('store_category_map', Base.metadata,
     Column('store_id', Integer, ForeignKey('stores.id'), primary_key=True)
 )
 
+
+
 # --- Modele de Bază ---
 
 class CourierCategory(Base):
@@ -53,6 +55,8 @@ class Store(Base):
   categories = relationship("StoreCategory", secondary=store_category_map, back_populates="stores")
   paper_size = Column(String(16), default='A6', nullable=False)
   dpd_client_id = Column(String(255), nullable=True) # ADĂUGAT
+
+
 
 
 class Order(Base):
@@ -162,6 +166,8 @@ class PrintLogEntry(Base):
     awb = Column(String(64), index=True)
     log = relationship('PrintLog', back_populates='entries')
 
+
+
 # --- Modele Noi pentru Curieri ---
 
 class CourierAccount(Base):
@@ -172,12 +178,12 @@ class CourierAccount(Base):
     account_key = Column(String(64), unique=True, nullable=False, index=True)
     courier_type = Column(String(64), nullable=False, index=True)
     tracking_url = Column(String(512), nullable=True)
-    credentials = Column(JSONB, nullable=True) # Am setat nullable=True pentru flexibilitate
+    credentials = Column(JSONB, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    # Adăugăm relația către CourierMapping
     mappings = relationship("CourierMapping", back_populates="account")
 
+    
 class CourierMapping(Base):
     __tablename__ = 'courier_mappings'
 
