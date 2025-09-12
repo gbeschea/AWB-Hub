@@ -19,7 +19,8 @@ async def get_settings_page(request: Request, templates: Jinja2Templates = Depen
 async def get_stores_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):
     """Afișează pagina de management al magazinelor."""
     stores = await crud_stores.get_stores(db)
-    return templates.TemplateResponse("settings_stores.html", {"request": request, "stores": stores})
+    pii_source_options = ['shopify', 'database']
+    return templates.TemplateResponse("settings_stores.html", {"request": request, "stores": stores, "pii_source_options": pii_source_options})
 
 @router.post('/stores', response_class=RedirectResponse, name="create_store")
 async def create_store_entry(
@@ -40,12 +41,20 @@ async def update_store_entry(
     domain: str = Form(...),
     shared_secret: str = Form(...),
     access_token: str = Form(...),
-    # MODIFICARE AICI: Primește valoarea ca un string
-    is_active: str = Form(...), 
+    is_active: str = Form(...),
+    pii_source: str = Form(...),
     db: AsyncSession = Depends(get_db)
 ):
     """Actualizează un magazin existent."""
-    # MODIFICARE AICI: Convertește string-ul 'true' în boolean
     is_active_bool = is_active.lower() == 'true'
-    await crud_stores.update_store(db, store_id=store_id, name=name, domain=domain, shared_secret=shared_secret, access_token=access_token, is_active=is_active_bool)
+    await crud_stores.update_store(
+        db,
+        store_id=store_id,
+        name=name,
+        domain=domain,
+        shared_secret=shared_secret,
+        access_token=access_token,
+        is_active=is_active_bool,
+        pii_source=pii_source
+    )
     return RedirectResponse(url="/settings/stores", status_code=303)

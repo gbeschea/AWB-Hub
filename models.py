@@ -42,7 +42,7 @@ class Store(Base):
   domain = Column(String(255), unique=True)
   shared_secret = Column(String(255), nullable=True)
   access_token = Column(String(255), nullable=True)
-  has_pii_access = Column(Boolean, default=True, nullable=False)
+  pii_source = Column(String(32), default='shopify', nullable=False)
   is_active = Column(Boolean, default=True, nullable=False)
   last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
   orders = relationship('Order', back_populates='store')
@@ -89,6 +89,17 @@ class Order(Base):
   shipments = relationship('Shipment', back_populates='order', cascade='all, delete-orphan')
   fulfillment_orders = relationship('FulfillmentOrder', back_populates='order', cascade='all, delete-orphan')
 
+class PiiData(Base):
+    __tablename__ = 'pii_data'
+    order_number = Column(String(255), primary_key=True)
+    shipping_name = Column(Text, nullable=True)
+    shipping_address1 = Column(Text, nullable=True)
+    shipping_address2 = Column(Text, nullable=True)
+    shipping_phone = Column(String(64), nullable=True)
+    shipping_city = Column(String(255), nullable=True)
+    shipping_zip = Column(String(32), nullable=True)
+    shipping_province = Column(String(255), nullable=True)
+    shipping_country = Column(String(255), nullable=True)
 
 
 class RomaniaAddress(Base):

@@ -2,105 +2,100 @@
 {% block title %}Setări Magazine - AWB Hub{% endblock %}
 
 {% block content %}
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-        <h1 style="margin: 0;">🏬 Setări Magazine</h1>
-        <a href="{{ url_for('get_settings_page') }}" role="button" class="secondary outline">← Înapoi la Setări</a>
-    </div>
+<div class="container">
+    <nav aria-label="breadcrumb">
+        <ul>
+            <li><a href="{{ url_for('get_settings_page') }}">Setări</a></li>
+            <li>Magazine</li>
+        </ul>
+    </nav>
+    <h1 style="margin-bottom: 1rem;">🏬 Setări Magazine</h1>
+    <p>Adaugă, editează sau dezactivează magazinele Shopify conectate.</p>
 
-    <div class="grid">
-        <article>
-            <hgroup>
-                <h2>Adaugă Magazin Nou</h2>
-            </hgroup>
-            <form action="{{ url_for('create_store') }}" method="post">
-                <label for="name">Nume Magazin</label>
-                <input type="text" id="name" name="name" placeholder="ex: Rossi RO" required>
-                
-                <label for="domain">Domeniu Shopify</label>
-                <input type="text" id="domain" name="domain" placeholder="ex: magazinul-meu.myshopify.com" required>
+    <hr>
 
-                <label for="access_token">Admin API Access Token</label>
-                <input type="password" id="access_token" name="access_token" placeholder="Lipește aici token-ul care începe cu 'shpat_...'" required>
-                <small>Folosit pentru a sincroniza comenzile.</small>
-
-                <label for="shared_secret" style="margin-top: 1rem;">Shared Secret (pentru Webhooks)</label>
-                <input type="password" id="shared_secret" name="shared_secret" placeholder="Lipește aici cheia de la configurarea webhook-urilor" required>
-                <small>Folosit pentru a verifica dacă webhook-urile sunt de la Shopify.</small>
-
-                <button type="submit" style="margin-top: 1rem;">Adaugă Magazin</button>
-            </form>
-        </article>
-
-        <article style="grid-column: span 2;">
-            <h2>Magazine Existente</h2>
-            <div class="main-table-wrapper">
-                <table class="striped">
-                    <thead>
-                        <tr>
-                            <th>Nume</th>
-                            <th>Domeniu</th>
-                            <th>Status</th>
-                            <th>Acțiuni</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for store in stores %}
-                        <tr>
-                            <td>{{ store.name }}</td>
-                            <td>{{ store.domain }}</td>
-                            <td>
-                                {% if store.is_active %}
-                                    <span style="color: green;">● Activ</span>
-                                {% else %}
-                                    <span style="color: red;">● Inactiv</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <button data-target="modal-edit-{{ store.id }}" onClick="toggleModal(event)">Editează</button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    <article>
+        <hgroup>
+            <h2>Adaugă un magazin nou</h2>
+            <p>Completează detaliile de mai jos pentru a conecta un nou magazin.</p>
+        </hgroup>
+        <form action="{{ url_for('create_store') }}" method="post">
+            <div class="grid">
+                <label for="name">
+                    Nume Magazin
+                    <input type="text" id="name" name="name" placeholder="ex: Magazinul Meu" required>
+                </label>
+                <label for="domain">
+                    Domeniu Shopify
+                    <input type="text" id="domain" name="domain" placeholder="ex: magazinul-meu.myshopify.com" required>
+                </label>
             </div>
-        </article>
-    </div>
+            <label for="shared_secret">Shared Secret</label>
+            <input type="password" id="shared_secret" name="shared_secret" required>
 
-    {% for store in stores %}
-    <dialog id="modal-edit-{{ store.id }}">
-        <article>
-            <header>
-                <a href="#close" aria-label="Close" class="close" data-target="modal-edit-{{ store.id }}" onClick="toggleModal(event)"></a>
-                <h3>Editează Magazin: {{ store.name }}</h3>
-            </header>
-            <form action="{{ url_for('update_store', store_id=store.id) }}" method="post">
-                <label for="name-{{ store.id }}">Nume Magazin</label>
-                <input type="text" id="name-{{ store.id }}" name="name" value="{{ store.name }}" required>
+            <label for="access_token">Access Token (Admin API)</label>
+            <input type="password" id="access_token" name="access_token" required>
+            
+            <button type="submit">Adaugă Magazin</button>
+        </form>
+    </article>
 
-                <label for="domain-{{ store.id }}">Domeniu Shopify</label>
-                <input type="text" id="domain-{{ store.id }}" name="domain" value="{{ store.domain }}" required>
+    <hr>
 
-                <label for="access_token-{{ store.id }}">Admin API Access Token</label>
-                <input type="password" id="access_token-{{ store.id }}" name="access_token" value="{{ store.access_token or '' }}" placeholder="Începe cu 'shpat_...'" required>
+    <h2>Magazine existente</h2>
+    {% if stores %}
+        {% for store in stores %}
+        <details>
+            <summary>
+                <strong>{{ store.name }}</strong> - 
+                <small>
+                    <code>{{ store.domain }}</code> - 
+                    <span style="color: {{ 'green' if store.is_active else 'red' }};">
+                        {{ 'Activ' if store.is_active else 'Inactiv' }}
+                    </span>
+                </small>
+            </summary>
+            <div class="grid">
+                <form action="{{ url_for('update_store', store_id=store.id) }}" method="post" class="card">
+                    <input type="hidden" name="store_id" value="{{ store.id }}">
+                    <label for="name-{{ store.id }}">Nume</label>
+                    <input type="text" id="name-{{ store.id }}" name="name" value="{{ store.name }}" required>
 
-                <label for="shared_secret-{{ store.id }}">Shared Secret (pentru Webhooks)</label>
-                <input type="password" id="shared_secret-{{ store.id }}" name="shared_secret" value="{{ store.shared_secret or '' }}" required>
+                    <label for="domain-{{ store.id }}">Domeniu</label>
+                    <input type="text" id="domain-{{ store.id }}" name="domain" value="{{ store.domain }}" required>
 
-                <fieldset>
-                    <legend>Status Magazin</legend>
-                    <input type="hidden" name="is_active" value="false"> <input type="checkbox" id="is_active-{{ store.id }}" name="is_active" value="true" {% if store.is_active %}checked{% endif %}>
-                    <label for="is_active-{{ store.id }}">Activ</label>
-                </fieldset>
+                    <label for="shared_secret-{{ store.id }}">Shared Secret (lasă gol pentru a nu schimba)</label>
+                    <input type="password" id="shared_secret-{{ store.id }}" name="shared_secret" value="{{ store.shared_secret }}">
 
-                <footer style="margin-top: 1rem;">
-                    <button type="submit">Salvează Modificările</button>
-                </footer>
-            </form>
-        </article>
-    </dialog>
-    {% endfor %}
-{% endblock %}
+                    <label for="access_token-{{ store.id }}">Access Token (lasă gol pentru a nu schimba)</label>
+                    <input type="password" id="access_token-{{ store.id }}" name="access_token" value="{{ store.access_token }}">
 
-{% block scripts %}
-    <script src="{{ url_for('static', path='js/main.js') }}"></script>
+                    <div class="grid">
+                        <label for="is_active-{{ store.id }}">
+                            Status
+                            <select id="is_active-{{ store.id }}" name="is_active" required>
+                                <option value="true" {% if store.is_active %}selected{% endif %}>Activ</option>
+                                <option value="false" {% if not store.is_active %}selected{% endif %}>Inactiv</option>
+                            </select>
+                        </label>
+                        <label for="pii_source-{{ store.id }}">
+                            Sursă PII
+                            <select id="pii_source-{{ store.id }}" name="pii_source" required>
+                                {% for option in pii_source_options %}
+                                <option value="{{ option }}" {% if store.pii_source == option %}selected{% endif %}>
+                                    {{ option.capitalize() }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                    </div>
+                    <button type="submit">Actualizează</button>
+                </form>
+            </div>
+        </details>
+        {% endfor %}
+    {% else %}
+        <p>Nu există magazine configurate.</p>
+    {% endif %}
+</div>
 {% endblock %}

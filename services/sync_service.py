@@ -92,8 +92,26 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
             financial_status = o.get('displayFinancialStatus', 'unknown')
             mapped_payment = map_payment_method(gateways, financial_status)
             total_price_str = o.get('totalPriceSet', {}).get('shopMoney', {}).get('amount', '0.0')
-
-            shipping_address = o.get('shippingAddress') or {}
+            
+            shipping_address = {}
+            if store_rec.pii_source == 'shopify':
+                shipping_address = o.get('shippingAddress') or {}
+            elif store_rec.pii_source == 'database':
+                pii_data_res = await db.execute(select(models.PiiData).where(models.PiiData.order_number == o.get('name')))
+                pii_data = pii_data_res.scalar_one_or_none()
+                if pii_data:
+                    shipping_address = {
+                        'name': pii_data.shipping_name,
+                        'address1': pii_data.shipping_address1,
+                        'address2': pii_data.shipping_address2,
+                        'phone': pii_data.shipping_phone,
+                        'city': pii_data.shipping_city,
+                        'zip': pii_data.shipping_zip,
+                        'province': pii_data.shipping_province,
+                        'country': pii_data.shipping_country,
+                    }
+                else:
+                    logging.warning(f"PII data not found in database for order {o.get('name')}")
 
             status_from_shopify = (o.get('displayFulfillmentStatus') or 'unfulfilled').strip().lower()
             if status_from_shopify == 'success':
@@ -197,4 +215,3 @@ async def run_couriers_sync(db: AsyncSession, full_sync: bool = False):
 async def run_full_sync(db: AsyncSession, days: int):
     await run_orders_sync(db, days, full_sync=True)
     await run_couriers_sync(db, full_sync=True)
-
