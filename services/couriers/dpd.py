@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 
 from settings import settings
 # MODIFICAT: Am schimbat 'CourierTracker' în 'BaseCourier'
-from .base import BaseCourier, TrackingStatus
+from .common import BaseCourierService, TrackingStatus
 
 async def track_awb(awb_number: str, account_key: str) -> Optional[TrackingStatus]:
     if not settings.DPD_CONFIG:
@@ -46,7 +46,7 @@ async def track_awb(awb_number: str, account_key: str) -> Optional[TrackingStatu
     return None
 
 # MODIFICAT: Am redenumit clasa în 'DPDCourier' și moștenește 'BaseCourier'
-class DPDCourier(BaseCourier):
+class DPDCourierService(BaseCourierService):
     async def track(self, awb: str) -> Optional[TrackingStatus]:
         return await track_awb(awb, self.account_key)
 

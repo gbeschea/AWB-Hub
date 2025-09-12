@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 
 from settings import settings
 # MODIFICAT: Am schimbat 'CourierTracker' în 'BaseCourier'
-from .base import BaseCourier, TrackingStatus
+from .common import BaseCourier, TrackingStatus
 
 async def track_awb(awb_number: str, account_key: str) -> Optional[TrackingStatus]:
     """

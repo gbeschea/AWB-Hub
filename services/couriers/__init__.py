@@ -1,22 +1,24 @@
-# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/services/couriers/__init__.py
+# services/couriers/__init__.py
 
-from typing import Optional
-from .base import BaseCourier
-from .sameday import SamedayCourier
-from .dpd import DPDCourier
-from .econt import EcontCourier
+from typing import Optional, Dict, Any
+# MODIFICAT: Importăm din 'common.py', nu din 'base.py'
+from .common import BaseCourierService 
+from .sameday import SamedayCourierService
+from .dpd import DPDCourierService
 
 COURIER_MAP = {
-    "sameday": SamedayCourier,
-    "dpd": DPDCourier,
-    "econt": EcontCourier,
+    "sameday": SamedayCourierService,
+    "dpd": DPDCourierService,
 }
 
-# MODIFICAT: Am adăugat 'account_key: str' la semnătura funcției
-def get_courier_service(courier_name: str, account_key: str) -> Optional[BaseCourier]:
-    """Factory function to get a courier service instance."""
+def get_courier_service(courier_name: str, account_key: str, settings: Dict[str, Any]) -> Optional[BaseCourierService]:
+    if not courier_name:
+        return None
     courier_class = COURIER_MAP.get(courier_name.lower())
     if courier_class:
-        # Pasăm 'account_key' la inițializarea clasei
-        return courier_class(account_key=account_key)
+        try:
+            return courier_class(account_key=account_key, settings=settings)
+        except Exception as e:
+            logging.error(f"Failed to instantiate courier '{courier_name}' with account key '{account_key}': {e}")
+            return None
     return None

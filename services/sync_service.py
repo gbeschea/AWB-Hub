@@ -44,23 +44,44 @@ def map_payment_method(gateways: List[str], financial_status: str) -> str:
 async def courier_from_shopify(db: AsyncSession, tracking_company: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Map a tracking company string to our courier and account keys using the database.
+    It first tries an exact match, then falls back to a partial match.
     """
     search_text = (tracking_company or '').strip()
     if not search_text:
         return None, None
 
-    # Caută o potrivire directă
-    result = await db.execute(select(models.CourierMapping).where(models.CourierMapping.shopify_name == search_text))
-    mapping = result.scalar_one_or_none()
+    # --- Pasul 1: Caută o potrivire directă (ca înainte) ---
+    exact_match_res = await db.execute(
+        select(models.CourierMapping).where(models.CourierMapping.shopify_name == search_text)
+    )
+    exact_mapping = exact_match_res.scalar_one_or_none()
 
-    if mapping:
-        # Preluăm și contul pentru a afla tipul de curier
-        acc_res = await db.execute(select(models.CourierAccount).where(models.CourierAccount.account_key == mapping.account_key))
+    if exact_mapping:
+        acc_res = await db.execute(
+            select(models.CourierAccount).where(models.CourierAccount.account_key == exact_mapping.account_key)
+        )
         account = acc_res.scalar_one_or_none()
         if account:
             return account.courier_type, account.account_key
 
-    logging.warning(f"Nu s-a găsit mapare în BD pentru curierul: '{tracking_company}'")
+    # --- Pasul 2: Fallback la potrivire parțială (LOGICA NOUĂ) ---
+    # Preluăm toate conturile active de curier
+    all_accounts_res = await db.execute(
+        select(models.CourierAccount).where(models.CourierAccount.is_active == True)
+    )
+    all_accounts = all_accounts_res.scalars().all()
+
+    # Căutăm un cont al cărui 'courier_type' se regăsește în numele de la Shopify
+    search_text_lower = search_text.lower()
+    for account in all_accounts:
+        if account.courier_type.lower() in search_text_lower:
+            # Am găsit o potrivire (ex: 'dpd' în 'dpd pixelwave')
+            # Returnăm primul cont găsit de acest tip.
+            logging.info(f"Potrivire parțială găsită pentru '{search_text}'. Folosim contul: {account.account_key}")
+            return account.courier_type, account.account_key
+
+    # Dacă nu am găsit nimic, afișăm avertismentul
+    logging.warning(f"Nu s-a găsit nicio mapare (nici directă, nici parțială) pentru curierul: '{search_text}'")
     return None, None
 
 
@@ -228,15 +249,21 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
                     if not awb: continue
                     
                     fulfillment_date = _dt(f.get('createdAt'))
-                    courier_key = courier_from_shopify(tracking_info.get('company', ''), tracking_info.get('url', ''))
+                    # Mai întâi, apelăm funcția și obținem cheia contului
+                    courier_type, account_key = await courier_from_shopify(db, tracking_info.get('company', ''))
 
+                    # Căutăm dacă există deja o înregistrare
                     shipment_res = await db.execute(select(models.Shipment).where(models.Shipment.awb == awb))
                     sh = shipment_res.scalar_one_or_none()
+
+                    # AICI ESTE CORECȚIA COMPLETĂ
                     if not sh:
-                        db.add(models.Shipment(order_id=order.id, awb=awb, courier=courier_key, account_key=courier_key, shopify_fulfillment_id=str(f.get('id')), fulfillment_created_at=fulfillment_date))
+                        # Dacă NU există, adăugăm una nouă folosind 'account_key'
+                        db.add(models.Shipment(order_id=order.id, awb=awb, courier=account_key, account_key=account_key, shopify_fulfillment_id=str(f.get('id')), fulfillment_created_at=fulfillment_date))
                     else:
-                        sh.courier = courier_key
-                        sh.account_key = courier_key
+                        # Dacă există, o actualizăm folosind tot 'account_key'
+                        sh.courier = account_key
+                        sh.account_key = account_key
                         sh.fulfillment_created_at = fulfillment_date
 
             all_processed_order_ids.add(order.id)
