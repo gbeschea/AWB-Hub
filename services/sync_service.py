@@ -1,3 +1,5 @@
+# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/services/sync_service.py
+
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -8,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import models
-from settings import settings
+from settings import settings, ShopifyStore # MODIFICAT: Importăm și ShopifyStore
 from . import shopify_service, address_service, courier_service
 from .utils import calculate_and_set_derived_status
 from websocket_manager import manager
@@ -58,7 +60,31 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     logging.warning(f"ORDER SYNC ({sync_type}) a pornit pentru ultimele {days} zile.")
     await manager.broadcast({"type": "sync_start", "message": f"Sincronizare comenzi ({sync_type})...", "sync_type": "orders"})
 
-    fetch_tasks = [shopify_service.fetch_orders(s, since_days=days) for s in settings.SHOPIFY_STORES]
+    # --- START MODIFICARE MAJORĂ ---
+    # Preluăm magazinele direct din baza de date, nu din fișierele de configurare
+    stores_from_db_res = await db.execute(select(models.Store).where(models.Store.is_active == True))
+    stores_from_db = stores_from_db_res.scalars().all()
+
+    if not stores_from_db:
+        logging.warning("ORDER SYNC: Nu există magazine active în baza de date. Sincronizarea a fost oprită.")
+        await manager.broadcast({"type": "sync_end", "message": "Nu sunt magazine active pentru sincronizare."})
+        return
+
+    # Construim obiectele ShopifyStore de care are nevoie shopify_service
+    # Mapăm câmpurile din baza de date (ex: access_token) la cele așteptate (ex: api_key)
+    stores_to_sync = [
+        ShopifyStore(
+            brand=db_store.name,
+            domain=db_store.domain,
+            shared_secret=db_store.shared_secret,
+            api_key=db_store.access_token, # Mapare
+            api_version="2024-04" # Poate fi adăugat ca un câmp în DB pe viitor
+        ) for db_store in stores_from_db
+    ]
+    
+    fetch_tasks = [shopify_service.fetch_orders(s, since_days=days) for s in stores_to_sync]
+    # --- FINAL MODIFICARE MAJORĂ ---
+
     all_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
     existing_stores_res = await db.execute(select(models.Store))
@@ -70,14 +96,16 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     processed_count = 0
     all_processed_order_ids = set()
 
-    for s, orders_or_exception in zip(settings.SHOPIFY_STORES, all_results):
+    # Am schimbat 'settings.SHOPIFY_STORES' cu 'stores_to_sync'
+    for s, orders_or_exception in zip(stores_to_sync, all_results):
         if isinstance(orders_or_exception, Exception):
             logging.warning(f"Eroare la preluarea comenzilor pentru {s.domain}: {orders_or_exception}")
             continue
 
         store_rec = existing_stores.get(s.domain)
+        # Verificarea de aici rămâne ca o plasă de siguranță, deși nu ar trebui să se întâmple
         if not store_rec:
-            logging.warning(f"ORDER SYNC: Magazinul '{s.brand}' ({s.domain}) nu a fost găsit în BD. Se adaugă automat.")
+            logging.warning(f"ORDER SYNC: Magazinul '{s.brand}' ({s.domain}) nu a fost găsit în BD, deși a fost sincronizat. Se adaugă automat.")
             store_rec = models.Store(name=s.brand, domain=s.domain)
             db.add(store_rec)
             await db.flush()
@@ -171,11 +199,7 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
                     awb = str(tracking_info.get('number', '')).strip()
                     if not awb: continue
 
-                    # --- START CORECȚIE ---
-                    # Definim variabila aici, la începutul buclei
                     fulfillment_date = _dt(f.get('createdAt'))
-                    # --- FINAL CORECȚIE ---
-
                     courier_key = courier_from_shopify(tracking_info.get('company', ''), tracking_info.get('url', ''))
 
                     shipment_res = await db.execute(select(models.Shipment).where(models.Shipment.awb == awb))
@@ -197,21 +221,4 @@ async def run_orders_sync(db: AsyncSession, days: int, full_sync: bool = False):
     if all_processed_order_ids:
         logging.warning(f"Validare adrese și recalculare statusuri pentru {len(all_processed_order_ids)} comenzi...")
         orders_to_recalc_res = await db.execute(select(models.Order).options(joinedload(models.Order.shipments)).where(models.Order.id.in_(all_processed_order_ids)))
-        orders_to_recalc = orders_to_recalc_res.unique().scalars().all()
-        for order in orders_to_recalc:
-            if order.address_status != 'valid':
-                await address_service.validate_address_for_order(db, order)
-            calculate_and_set_derived_status(order)
-
-    await db.commit()
-    await manager.broadcast({"type": "sync_end", "message": f"Sincronizare finalizată! {processed_count} comenzi actualizate."})
-    logging.warning(f"ORDER SYNC finalizat în {(datetime.now(timezone.utc) - start_ts).total_seconds():.1f}s.")
-
-    
-
-async def run_couriers_sync(db: AsyncSession, full_sync: bool = False):
-    await courier_service.track_and_update_shipments(db, full_sync=full_sync)
-
-async def run_full_sync(db: AsyncSession, days: int):
-    await run_orders_sync(db, days, full_sync=True)
-    await run_couriers_sync(db, full_sync=True)
+        orders_to_recalc = orders_to_recalc_res.unique

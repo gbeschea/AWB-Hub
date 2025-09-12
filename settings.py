@@ -1,18 +1,17 @@
 # gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/settings.py
 
-from pydantic import BaseModel # ADĂUGAT: Importăm BaseModel
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from typing import List, Dict, Any, Optional
 import json
 from pathlib import Path
 
-# ADĂUGAT: Definim clasa lipsă 'ShopifyStore'
 class ShopifyStore(BaseModel):
     brand: str
     domain: str
     api_key: str
     shared_secret: str
-    api_version: str = "2024-04" # Valoare implicită, poate fi ajustată
+    api_version: str = "2024-04"
 
 def json_config_settings_source(settings: BaseSettings) -> Dict[str, Any]:
     """
@@ -29,7 +28,6 @@ def json_config_settings_source(settings: BaseSettings) -> Dict[str, Any]:
 class Settings(BaseSettings):
     DATABASE_URL: str
     
-    # MODIFICAT: Folosim noua clasă ShopifyStore în loc de Dict
     SHOPIFY_STORES: Optional[List[ShopifyStore]] = None 
     COURIER_MAP: Optional[Dict[str, str]] = None
     PAYMENT_MAP: Optional[Dict[str, List[str]]] = None
@@ -70,7 +68,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-def load_json_config(file_path: str) -> Any: # Am schimbat în Any
+def load_json_config(file_path: str) -> Any:
     path = Path(file_path)
     if path.exists():
         with open(path, 'r', encoding='utf-8') as f:
@@ -80,7 +78,12 @@ def load_json_config(file_path: str) -> Any: # Am schimbat în Any
 settings.COURIER_MAP = load_json_config('config/courier_map.json')
 settings.PAYMENT_MAP = load_json_config('config/payment_map.json')
 settings.COURIER_STATUS_MAP = load_json_config('config/courier_status_map.json')
-settings.SHOPIFY_STORES = load_json_config('config/shopify_stores.json')
+
+# MODIFICAT: Aici parsăm dicționarele în obiecte ShopifyStore
+shopify_stores_data = load_json_config('config/shopify_stores.json')
+if shopify_stores_data:
+    settings.SHOPIFY_STORES = [ShopifyStore.model_validate(s) for s in shopify_stores_data]
+
 settings.SAMEDAY_CONFIG = load_json_config('config/sameday.json')
 settings.DPD_CONFIG = load_json_config('config/dpd.json')
 settings.ECONT_CONFIG = load_json_config('config/econt.json')
