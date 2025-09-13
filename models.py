@@ -82,8 +82,6 @@ class Order(Base):
   assigned_courier = Column(String(64), nullable=True)
   is_on_hold_shopify = Column(Boolean, default=False, nullable=False, index=True)
   
-  # --- CORECȚIA CRITICĂ ESTE AICI ---
-  derived_status = Column(String(255), nullable=True)
   
   store = relationship('Store', back_populates='orders')
   line_items = relationship('LineItem', back_populates='order', cascade='all, delete-orphan')
@@ -124,9 +122,6 @@ class Shipment(Base):
   printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
   last_status = Column(String(255), nullable=True, index=True)
   last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
-
-  # --- CORECȚIA CRITICĂ ESTE AICI ---
-  derived_status = Column(String(255), nullable=True)
   
   order = relationship('Order', back_populates='shipments')
 
