@@ -1,177 +1,198 @@
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float, Table, Index, Boolean
-from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
+from sqlalchemy import (
+    Column, Integer, String, DateTime, Boolean, Float, ForeignKey, Text, JSON
+)
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.types import JSON
 from sqlalchemy.sql import func
-from database import Base
 
-# --- Hărți pentru relații Many-to-Many ---
-courier_category_map = Table('courier_category_map', Base.metadata,
-    Column('category_id', Integer, ForeignKey('courier_categories.id'), primary_key=True),
-    Column('courier_key', String(64), primary_key=True)
-)
-store_category_map = Table('store_category_map', Base.metadata,
-    Column('category_id', Integer, ForeignKey('store_categories.id'), primary_key=True),
-    Column('store_id', Integer, ForeignKey('stores.id'), primary_key=True)
-)
+# Baza declarativă pentru modelele SQLAlchemy
+Base = declarative_base()
 
-# --- Modele de Bază ---
-class CourierCategory(Base):
-    __tablename__ = 'courier_categories'
-    id = Column(Integer, primary_key=True)
-    name = Column(String(255), unique=True, nullable=False)
-    tracking_url_template = Column(String(512), nullable=True)
-
-class StoreCategory(Base):
-    __tablename__ = 'store_categories'
-    id = Column(Integer, primary_key=True)
-    name = Column(String(255), unique=True, nullable=False)
-    stores = relationship("Store", secondary=store_category_map, back_populates="categories")
-    default_courier = Column(String(64), nullable=True)
-    default_courier_account = Column(String(64), nullable=True)
-    dpd_pickup_location_id = Column(String(255), nullable=True)
+# -----------------
+# MODELE PRINCIPALE
+# -----------------
 
 class Store(Base):
-  __tablename__ = 'stores'
-  id = Column(Integer, primary_key=True)
-  name = Column(String(255))
-  domain = Column(String(255), unique=True)
-  shared_secret = Column(String(255), nullable=True)
-  access_token = Column(String(255), nullable=True)
-  pii_source = Column(String(32), default='shopify', nullable=False)
-  is_active = Column(Boolean, default=True, nullable=False)
-  last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  orders = relationship('Order', back_populates='store')
-  categories = relationship("StoreCategory", secondary=store_category_map, back_populates="stores")
-  paper_size = Column(String(16), default='A6', nullable=False)
-  dpd_client_id = Column(String(255), nullable=True)
+    """Definește un magazin Shopify conectat la aplicație."""
+    __tablename__ = 'stores'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    domain = Column(String, unique=True, nullable=False)
+    access_token = Column(String, nullable=False)
+    api_version = Column(String, nullable=False)
+    orders = relationship("Order", back_populates="store", cascade="all, delete-orphan")
+    store_category_maps = relationship("StoreCategoryMap", back_populates="store", cascade="all, delete-orphan")
+    store_courier_account_maps = relationship("StoreCourierAccountMap", back_populates="store", cascade="all, delete-orphan")
 
 class Order(Base):
-  __tablename__ = 'orders'
-  id = Column(Integer, primary_key=True)
-  store_id = Column(Integer, ForeignKey('stores.id'))
-  shopify_order_id = Column(String(50), unique=True, index=True)
-  name = Column(String(64))
-  customer = Column(String(255))
-  created_at = Column(TIMESTAMP(timezone=True))
-  updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
-  cancelled_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  financial_status = Column(String(64), index=True)
-  total_price = Column(Float, nullable=True)
-  payment_gateway_names = Column(Text, nullable=True)
-  mapped_payment = Column(String(64), nullable=True)
-  tags = Column(Text, nullable=True)
-  note = Column(Text, nullable=True)
-  sync_status = Column(String(32), default='not_synced')
-  last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  shopify_status = Column(String(64), nullable=True, index=True)
-  fulfilled_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  shipping_name = Column(Text, nullable=True)
-  shipping_address1 = Column(Text, nullable=True)
-  shipping_address2 = Column(Text, nullable=True)
-  shipping_phone = Column(String(64), nullable=True)
-  shipping_city = Column(String(255), nullable=True)
-  shipping_zip = Column(String(32), nullable=True)
-  shipping_province = Column(String(255), nullable=True)
-  shipping_country = Column(String(255), nullable=True)
-  address_status = Column(String(32), default='nevalidat', index=True, nullable=False)
-  address_score = Column(Integer, nullable=True)
-  address_validation_errors = Column(JSON, nullable=True)
-  processing_status = Column(String(32), default='pending_validation', index=True, nullable=False)
-  assigned_courier = Column(String(64), nullable=True)
-  is_on_hold_shopify = Column(Boolean, default=False, nullable=False, index=True)
-  
-  # --- CORECȚIA CRITICĂ ESTE AICI ---
-  derived_status = Column(String(255), nullable=True)
-  
-  store = relationship('Store', back_populates='orders')
-  line_items = relationship('LineItem', back_populates='order', cascade='all, delete-orphan')
-  shipments = relationship('Shipment', back_populates='order', cascade='all, delete-orphan')
-  fulfillment_orders = relationship('FulfillmentOrder', back_populates='order', cascade='all, delete-orphan')
-
-class RomaniaAddress(Base):
-    __tablename__ = 'romania_addresses'
+    """Stochează o comandă importată dintr-un magazin Shopify."""
+    __tablename__ = 'orders'
     id = Column(Integer, primary_key=True)
-    judet = Column(String(255), index=True)
-    localitate = Column(String(255), index=True)
-    sector = Column(String(32), nullable=True, index=True)
-    tip_artera = Column(String(64), nullable=True, index=True)
-    nume_strada = Column(String(512), nullable=True, index=True)
-    cod_postal = Column(String(10), index=True)
-    __table_args__ = (Index('ix_localitate_judet', 'localitate', 'judet'),)
+    shopify_order_id = Column(String, unique=True, nullable=False)
+    order_number = Column(String, unique=True, nullable=False, index=True)
+    store_id = Column(Integer, ForeignKey('stores.id'), nullable=False)
+    financial_status = Column(String)
+    fulfillment_status = Column(String)
+    total_price = Column(Float)
+    currency = Column(String)
+    order_date = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    store = relationship("Store", back_populates="orders")
+    pii_data = relationship("PiiData", uselist=False, back_populates="order", cascade="all, delete-orphan")
+    shipments = relationship("Shipment", back_populates="order", cascade="all, delete-orphan")
+    line_items = relationship("LineItem", back_populates="order", cascade="all, delete-orphan")
+
+class PiiData(Base):
+    """Stochează datele personale (PII) pentru comenzi."""
+    __tablename__ = 'pii_data'
+    order_number = Column(String, ForeignKey('orders.order_number'), primary_key=True)
+    customer_name = Column(String)
+    customer_phone = Column(String)
+    customer_email = Column(String)
+    shipping_address = Column(Text)
+    order = relationship("Order", back_populates="pii_data")
 
 class LineItem(Base):
-  __tablename__ = 'line_items'
-  id = Column(Integer, primary_key=True)
-  order_id = Column(Integer, ForeignKey('orders.id'))
-  sku = Column(String(128), index=True)
-  title = Column(Text)
-  quantity = Column(Integer)
-  order = relationship('Order', back_populates='line_items')
+    """Definește un produs dintr-o comandă."""
+    __tablename__ = 'line_items'
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
+    shopify_line_item_id = Column(String, unique=True)
+    product_id = Column(String)
+    sku = Column(String, index=True)
+    name = Column(String)
+    quantity = Column(Integer)
+    price = Column(Float)
+    order = relationship("Order", back_populates="line_items")
 
 class Shipment(Base):
-  __tablename__ = 'shipments'
-  id = Column(Integer, primary_key=True)
-  order_id = Column(Integer, ForeignKey('orders.id'))
-  fulfillment_created_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  shopify_fulfillment_id = Column(String(50), nullable=True, index=True)
-  awb = Column(String(64), index=True)
-  courier_specific_data = Column(JSON, nullable=True)
-  courier = Column(String(64), index=True)
-  account_key = Column(String(32))
-  paper_size = Column(String(16))
-  printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
-  last_status = Column(String(255), nullable=True, index=True)
-  last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
-
-  # --- CORECȚIA CRITICĂ ESTE AICI ---
-  derived_status = Column(String(255), nullable=True)
-  
-  order = relationship('Order', back_populates='shipments')
-
-class FulfillmentOrder(Base):
-    __tablename__ = 'fulfillment_orders'
+    """Definește un AWB asociat unei comenzi."""
+    __tablename__ = 'shipments'
     id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey('orders.id'), index=True)
-    shopify_fulfillment_order_id = Column(String(50), unique=True, index=True)
-    status = Column(String(64))
-    hold_details = Column(JSON, nullable=True)
-    order = relationship('Order', back_populates='fulfillment_orders')
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
+    awb = Column(String, unique=True, index=True)
+    courier_key = Column(String)
+    status = Column(String, default="new")
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    order = relationship("Order", back_populates="shipments")
 
-class PrintLog(Base):
-    __tablename__ = 'print_logs'
-    id = Column(Integer, primary_key=True)
-    created_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
-    category_name = Column(String(255))
-    category_id = Column(Integer)
-    awb_count = Column(Integer)
-    user_ip = Column(String(45), nullable=True)
-    pdf_path = Column(String(512), nullable=True)
-    entries = relationship('PrintLogEntry', back_populates='log', cascade='all, delete-orphan')
-
-class PrintLogEntry(Base):
-    __tablename__ = 'print_log_entries'
-    id = Column(Integer, primary_key=True)
-    print_log_id = Column(Integer, ForeignKey('print_logs.id'))
-    order_name = Column(String(64))
-    awb = Column(String(64), index=True)
-    log = relationship('PrintLog', back_populates='entries')
+# ---------------------
+# MODELE PENTRU CURIERI
+# ---------------------
 
 class CourierAccount(Base):
+    """Stochează datele de autentificare pentru un cont de curier."""
     __tablename__ = 'courier_accounts'
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False)
-    account_key = Column(String(64), unique=True, nullable=False, index=True)
-    courier_type = Column(String(64), nullable=False, index=True)
-    tracking_url = Column(String(512), nullable=True)
-    credentials = Column(JSONB, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
+    account_key = Column(String, unique=True, nullable=False)
+    courier_key = Column(String, nullable=False)
+    credentials = Column(JSON, nullable=False)
+    store_courier_account_maps = relationship("StoreCourierAccountMap", back_populates="courier_account", cascade="all, delete-orphan")
     mappings = relationship("CourierMapping", back_populates="account")
 
 class CourierMapping(Base):
+    """Harta de valori specifice unui cont de curier (ex: ID serviciu)."""
     __tablename__ = 'courier_mappings'
     id = Column(Integer, primary_key=True)
-    shopify_name = Column(String(255), unique=True, nullable=False, index=True)
-    account_key = Column(String(64), ForeignKey('courier_accounts.account_key'), nullable=False)
+    account_key = Column(String, ForeignKey('courier_accounts.account_key'))
+    key = Column(String, nullable=False)
+    value = Column(String, nullable=False)
     account = relationship("CourierAccount", back_populates="mappings")
+
+class CourierCategory(Base):
+    """Definește o categorie de curier (ex: 'standard', 'express')."""
+    __tablename__ = 'courier_categories'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+
+class CourierCategoryMap(Base):
+    """Leagă un curier de o categorie."""
+    __tablename__ = 'courier_category_map'
+    category_id = Column(Integer, ForeignKey('courier_categories.id'), primary_key=True)
+    courier_key = Column(String, primary_key=True)
+
+class CourierStatusMappingRule(Base):
+    """Definește reguli de mapare a statusurilor primite de la curieri."""
+    __tablename__ = 'courier_status_mapping_rules'
+    id = Column(Integer, primary_key=True)
+    courier_key = Column(String, nullable=False, index=True)
+    raw_status_keyword = Column(String, nullable=False)
+    standardized_status = Column(String, nullable=False)
+
+# -----------------------------
+# MODELE DE CONFIGURARE MAGAZIN
+# -----------------------------
+
+class StoreCourierAccountMap(Base):
+    """Leagă magazinele de conturile de curier."""
+    __tablename__ = 'store_courier_account_map'
+    store_id = Column(Integer, ForeignKey('stores.id'), primary_key=True)
+    courier_account_id = Column(Integer, ForeignKey('courier_accounts.id'), primary_key=True)
+    store = relationship("Store", back_populates="store_courier_account_maps")
+    courier_account = relationship("CourierAccount", back_populates="store_courier_account_maps")
+
+class StoreCategory(Base):
+    """Definește o categorie în care poate fi încadrat un magazin."""
+    __tablename__ = 'store_categories'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False)
+    store_category_maps = relationship("StoreCategoryMap", back_populates="category", cascade="all, delete-orphan")
+
+class StoreCategoryMap(Base):
+    """Leagă magazinele de categoriile de magazine."""
+    __tablename__ = 'store_category_map'
+    category_id = Column(Integer, ForeignKey('store_categories.id'), primary_key=True)
+    store_id = Column(Integer, ForeignKey('stores.id'), primary_key=True)
+    store = relationship("Store", back_populates="store_category_maps")
+    category = relationship("StoreCategory", back_populates="store_category_maps")
+
+# -----------------
+# MODELE UTILITARE
+# -----------------
+
+class User(Base):
+    """Definește un utilizator al aplicației."""
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    is_active = Column(Boolean, default=True)
+
+class SyncOperation(Base):
+    """Înregistrează operațiunile de sincronizare a datelor."""
+    __tablename__ = 'sync_operations'
+    id = Column(Integer, primary_key=True)
+    start_time = Column(DateTime, default=func.now())
+    end_time = Column(DateTime)
+    status = Column(String)
+    details = Column(Text)
+
+class PrintLog(Base):
+    """Log general pentru o sesiune de printare."""
+    __tablename__ = 'print_logs'
+    id = Column(Integer, primary_key=True)
+    print_time = Column(DateTime, default=func.now())
+    user_id = Column(Integer, ForeignKey('users.id'))
+    status = Column(String)
+    entries = relationship("PrintLogEntry", back_populates="print_log", cascade="all, delete-orphan")
+
+class PrintLogEntry(Base):
+    """Detalii pentru fiecare AWB printat."""
+    __tablename__ = 'print_log_entries'
+    id = Column(Integer, primary_key=True)
+    print_log_id = Column(Integer, ForeignKey('print_logs.id'))
+    shipment_id = Column(Integer, ForeignKey('shipments.id'))
+    status = Column(String)
+    print_log = relationship("PrintLog", back_populates="entries")
+
+class RomaniaAddress(Base):
+    """Stochează adrese din România pentru validare."""
+    __tablename__ = 'romania_addresses'
+    id = Column(Integer, primary_key=True)
+    county = Column(String)
+    city = Column(String)
+    locality = Column(String)
+    street = Column(String)
+    postal_code = Column(String)

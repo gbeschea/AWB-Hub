@@ -1,33 +1,26 @@
 {% extends "_layout.html" %}
-{% block title %}Setări - AWB Hub{% endblock %}
 
 {% block content %}
-    <h1 style="margin-bottom: 2rem;">⚙️ Setări Generale</h1>
-    <p>Alege o secțiune pentru a o configura.</p>
+<div class="container">
+    <h1>Setări Aplicație</h1>
+    <p>Selectează ce dorești să configurezi:</p>
+    
+    <div class="settings-menu">
+        <a href="{{ url_for('get_stores_settings') }}" class="button">Gestionează Magazine</a>
+        <a href="{{ url_for('get_couriers_settings') }}" class="button">Gestionează Curieri</a>
+    </div>
 
-    <div class="grid">
-        <article>
-            <hgroup>
-                <h2>🏬 Magazine</h2>
-                <p>Adaugă, editează sau dezactivează magazinele Shopify conectate.</p>
-            </hgroup>
-            <a href="{{ url_for('get_stores_page') }}" role="button">Gestionează Magazinele</a>
-        </article>
-        
-        <article>
-            <hgroup>
-                <h2>🚚 Conturi Curieri</h2>
-                <p>Configurează conturile de curieri, credențialele și link-urile de tracking.</p>
-            </hgroup>
-            <a href="{{ url_for('get_couriers_page') }}" role="button">Gestionează Curierii</a>
-        </article>
+    <hr>
 
-        <article>
-            <hgroup>
-                <h2>📇 Categorii Magazine</h2>
-                <p>Grupează magazinele în categorii pentru o mai bună organizare.</p>
-            </hgroup>
-            <a href="{{ url_for('get_categories_page') }}" role="button">Gestionează Categoriile</a>
-        </article>
-        </div>
+    <div class="sync-section">
+        <h2>Sincronizare Comenzi</h2>
+        <p>
+            Poți declanșa manual o sincronizare a comenzilor pentru toate magazinele.
+            Acest proces va aduce ultimele comenzi din Shopify în AWB Hub.
+        </p>
+        <form action="/sync/run" method="post">
+            <button type="submit" class="button-primary">Pornește Sincronizarea</button>
+        </form>
+    </div>
+</div>
 {% endblock %}
