@@ -6,6 +6,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 import models
 from database import get_db
+from fastapi.templating import Jinja2Templates
+from zoneinfo import ZoneInfo
+from datetime import datetime
+
+
+
+templates = Jinja2Templates(directory="templates")
+
+ROMANIA_TZ = ZoneInfo("Europe/Bucharest")
+
+templates = Jinja2Templates(directory="templates") # Definim templates aici
+
+def to_local_time(utc_dt: datetime):
+    if utc_dt is None:
+        return None
+    return utc_dt.astimezone(ROMANIA_TZ)
+
+# ADAUGĂ ACEASTĂ LINIE PENTRU A ÎNREGISTRA FILTRUL
+templates.env.filters["localtime"] = to_local_time
+
 
 async def get_stores_from_db(db: AsyncSession = Depends(get_db)):
     """

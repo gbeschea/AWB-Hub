@@ -48,7 +48,6 @@ async def startup_event():
         await conn.run_sync(models.Base.metadata.create_all)
     # --- Sfârșitul blocului adăugat ---
 
-    start_background_tasks()
 
 
 @app.websocket("/ws/status")

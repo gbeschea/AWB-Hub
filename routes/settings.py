@@ -2,13 +2,14 @@
 
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db
-from crud import stores as crud_stores
+from sqlalchemy.exc import IntegrityError
+
+import crud.stores as crud_stores
+from dependencies import templates, get_db
+
 
 router = APIRouter(prefix='/settings', tags=['Settings'])
-templates = Jinja2Templates(directory="templates")
 
 
 @router.get('', response_class=HTMLResponse, name="get_settings_page")
@@ -16,24 +17,47 @@ async def get_settings_page(request: Request):
     """Afișează pagina principală de setări, care acționează ca un hub."""
     return templates.TemplateResponse("settings.html", {"request": request})
 
-@router.get('/stores', response_class=HTMLResponse, name="get_stores_page")
+@router.get("/settings/stores", name="view_stores_settings", response_class=HTMLResponse)
 async def get_stores_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Afișează pagina de management al magazinelor."""
     stores = await crud_stores.get_stores(db)
     pii_source_options = ['shopify', 'metafield']
     return templates.TemplateResponse("settings_stores.html", {"request": request, "stores": stores, "pii_source_options": pii_source_options})
 
-@router.post('/stores', response_class=RedirectResponse, name="create_store")
+@router.post("/settings/stores", name="create_store")
 async def create_store_entry(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
     name: str = Form(...),
     domain: str = Form(...),
     shared_secret: str = Form(...),
-    access_token: str = Form(...),
-    db: AsyncSession = Depends(get_db)
+    access_token: str = Form(...)
 ):
-    """Creează un magazin nou."""
-    await crud_stores.create_store(db, name=name, domain=domain, shared_secret=shared_secret, access_token=access_token)
-    return RedirectResponse(url="/settings/stores", status_code=303)
+    try:
+        await crud_stores.create_store(
+            db,
+            name=name,
+            domain=domain,
+            shared_secret=shared_secret,
+            access_token=access_token
+        )
+        # Setează un mesaj de succes (dacă folosești flash messages)
+        # request.session['flash_messages'] = [("Magazinul a fost adăugat cu succes.", "success")]
+
+    except IntegrityError:
+        # Aici prindem eroarea de duplicat
+        await db.rollback() # Anulează tranzacția eșuată
+        # Setează un mesaj de eroare
+        # request.session['flash_messages'] = [(f"Un magazin cu domeniul '{domain}' există deja.", "danger")]
+
+    except Exception as e:
+        # Prinde orice altă eroare neașteptată
+        await db.rollback()
+        # request.session['flash_messages'] = [(f"A apărut o eroare: {e}", "danger")]
+
+    # La final, redirecționează utilizatorul înapoi la pagina de setări
+    # Asigură-te că URL-ul este corect
+    return RedirectResponse(url=router.url_path_for("view_stores_settings"), status_code=303)
 
 @router.post('/stores/{store_id}', response_class=RedirectResponse, name="update_store")
 async def update_store_entry(
