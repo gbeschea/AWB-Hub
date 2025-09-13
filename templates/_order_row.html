@@ -66,7 +66,9 @@
     {% endif %}
 </td>
 <td data-column-key="status_curier">
-  <small>{{ order.mapped_courier_status or '' }}</small>
+    {# Aici afișăm direct atributul 'derived_status' al obiectului 'order' #}
+    {# Acesta este populat din VIEW de către SQLAlchemy #}
+    <small>{{ order.derived_status or '' }}</small>
 </td>
   <td data-column-key="printat">
       {% if latest_shipment and awb %}

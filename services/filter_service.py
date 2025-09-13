@@ -71,7 +71,8 @@ def _apply_joins_and_filters(base_query: Select, filters: Dict[str, Any], orders
     
     query = query.outerjoin(shipments_alias, orders_alias.id == shipments_alias.order_id)
     
-    if filters.get('sku'):
+    # Adăugăm join-ul pentru `line_items` dacă este necesară sortarea sau filtrarea după SKU
+    if filters.get('sku') or filters.get('sort_by', '').startswith('line_items_group'):
         query = query.join(models.LineItem, orders_alias.id == models.LineItem.order_id)
     if filters.get('store') or filters.get('category'):
         query = query.join(models.Store, orders_alias.store_id == models.Store.id)
@@ -88,11 +89,11 @@ async def apply_filters(db: AsyncSession, **kwargs) -> Tuple[List[models.Order],
     """Preia și paginează comenzile, adaptat complet pentru arhitectura cu VIEW-uri."""
     page, page_size, sort_by = kwargs.get('page', 1), kwargs.get('page_size', 50), kwargs.get('sort_by', 'created_at_desc')
     active_filters = {k: v for k, v in kwargs.items() if k not in ['db', 'page', 'page_size', 'sort_by'] and v and v != 'all'}
+    active_filters['sort_by'] = sort_by
 
     orders_view = aliased(models.Order, name="orders_with_derived_status")
     shipments_view = aliased(models.Shipment, name="shipments_with_derived_status")
 
-    # Interogare pentru a număra totalul
     count_q_base = select(func.count(orders_view.id.distinct())).select_from(orders_view)
     count_q = _apply_joins_and_filters(count_q_base, active_filters, orders_view, shipments_view)
     total_count_res = await db.execute(count_q)
@@ -101,23 +102,20 @@ async def apply_filters(db: AsyncSession, **kwargs) -> Tuple[List[models.Order],
     if total_count == 0:
         return [], 0
 
-    # Interogare pentru a prelua ID-urile paginante
     ids_q_base = select(orders_view.id).select_from(orders_view)
     ids_q = _apply_joins_and_filters(ids_q_base, active_filters, orders_view, shipments_view)
+    
     ids_q = ids_q.group_by(orders_view.id)
 
-    # Logica de sortare complexă, adaptată pentru alias-uri
     sort_key, _, sort_dir = sort_by.rpartition('_')
     sort_direction = desc if sort_dir == 'desc' else asc
     
     if sort_key == 'line_items_group':
-        ids_q = ids_q.outerjoin(models.LineItem)
         product_signature = literal_column("string_agg(line_items.quantity::TEXT || 'x' || line_items.sku, ';' ORDER BY line_items.sku)")
         unique_sku_count = func.count(models.LineItem.sku.distinct())
         single_sku_quantity = case((unique_sku_count == 1, func.sum(models.LineItem.quantity)), else_=999)
         first_sku = func.min(models.LineItem.sku)
         final_sort = [sort_direction(unique_sku_count), sort_direction(first_sku), sort_direction(single_sku_quantity), sort_direction(product_signature)]
-        ids_q = ids_q.group_by(orders_view.id)
     else:
         sort_map = {'created_at': orders_view.created_at, 'order_name': orders_view.name, 'order_status': orders_view.derived_status, 'awb_status': shipments_view.last_status, 'printed_at': shipments_view.printed_at, 'awb': shipments_view.awb}
         if sort_key in sort_map:
@@ -134,7 +132,6 @@ async def apply_filters(db: AsyncSession, **kwargs) -> Tuple[List[models.Order],
     if not paginated_order_ids:
         return [], total_count
 
-    # Interogarea finală pentru a prelua obiectele complete
     results_q = select(orders_view).options(
         selectinload(orders_view.shipments.of_type(shipments_view)),
         selectinload(orders_view.line_items),
@@ -189,17 +186,15 @@ async def get_filter_counts(db: AsyncSession, active_filters: Dict[str, Any]) ->
             group_counts['neprintat'] = res_n.scalar_one()
             res_f = await db.execute(select(func.count(models.Order.id.distinct())).outerjoin(models.Shipment).where(models.Order.id.in_(select(subq)), models.Shipment.awb.is_(None)))
             group_counts['fara_awb'] = res_f.scalar_one()
-
+        
         else:
             count_q = None
-            base_count_query = select(func.count(models.Order.id.distinct()))
-            
             if group_key == 'courier':
                 count_q = select(shipments_view_alias.courier, func.count(shipments_view_alias.order_id.distinct())).select_from(shipments_view_alias).where(shipments_view_alias.order_id.in_(select(subq))).group_by(shipments_view_alias.courier)
             elif group_key in ['store', 'category']:
-                # Această numărătoare necesită join-uri complexe și e mai bine să o lași pe 'all'
                 pass
-            else: # Rulează pe orders_view
+            else: 
+                # Folosim getattr pe alias, care acum știe de `derived_status`
                 count_q = select(getattr(orders_view_alias, col), func.count()).select_from(orders_view_alias).where(orders_view_alias.id.in_(select(subq))).group_by(getattr(orders_view_alias, col))
             
             if count_q is not None:

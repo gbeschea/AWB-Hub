@@ -1,31 +1,22 @@
-# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/models.py
-
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float, Table, Index, Boolean
-# MODIFICAT: Am adăugat JSONB la import
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
 from sqlalchemy.sql import func
-from database import Base # This line might already exist
-
+from database import Base
 
 # --- Hărți pentru relații Many-to-Many ---
-
 courier_category_map = Table('courier_category_map', Base.metadata,
     Column('category_id', Integer, ForeignKey('courier_categories.id'), primary_key=True),
     Column('courier_key', String(64), primary_key=True)
 )
-
 store_category_map = Table('store_category_map', Base.metadata,
     Column('category_id', Integer, ForeignKey('store_categories.id'), primary_key=True),
     Column('store_id', Integer, ForeignKey('stores.id'), primary_key=True)
 )
 
-
-
 # --- Modele de Bază ---
-
 class CourierCategory(Base):
     __tablename__ = 'courier_categories'
     id = Column(Integer, primary_key=True)
@@ -54,8 +45,7 @@ class Store(Base):
   orders = relationship('Order', back_populates='store')
   categories = relationship("StoreCategory", secondary=store_category_map, back_populates="stores")
   paper_size = Column(String(16), default='A6', nullable=False)
-  dpd_client_id = Column(String(255), nullable=True) # ADĂUGAT
-
+  dpd_client_id = Column(String(255), nullable=True)
 
 class Order(Base):
   __tablename__ = 'orders'
@@ -92,15 +82,33 @@ class Order(Base):
   assigned_courier = Column(String(64), nullable=True)
   is_on_hold_shopify = Column(Boolean, default=False, nullable=False, index=True)
   
-  # Adăugăm coloana pentru a putea încărca valoarea din VIEW, dar NU o calculăm aici
+  # --- CORECȚIA CRITICĂ ESTE AICI ---
   derived_status = Column(String(255), nullable=True)
   
-  # --- RELAȚII STANDARD ȘI CORECTE ---
   store = relationship('Store', back_populates='orders')
   line_items = relationship('LineItem', back_populates='order', cascade='all, delete-orphan')
   shipments = relationship('Shipment', back_populates='order', cascade='all, delete-orphan')
   fulfillment_orders = relationship('FulfillmentOrder', back_populates='order', cascade='all, delete-orphan')
 
+class RomaniaAddress(Base):
+    __tablename__ = 'romania_addresses'
+    id = Column(Integer, primary_key=True)
+    judet = Column(String(255), index=True)
+    localitate = Column(String(255), index=True)
+    sector = Column(String(32), nullable=True, index=True)
+    tip_artera = Column(String(64), nullable=True, index=True)
+    nume_strada = Column(String(512), nullable=True, index=True)
+    cod_postal = Column(String(10), index=True)
+    __table_args__ = (Index('ix_localitate_judet', 'localitate', 'judet'),)
+
+class LineItem(Base):
+  __tablename__ = 'line_items'
+  id = Column(Integer, primary_key=True)
+  order_id = Column(Integer, ForeignKey('orders.id'))
+  sku = Column(String(128), index=True)
+  title = Column(Text)
+  quantity = Column(Integer)
+  order = relationship('Order', back_populates='line_items')
 
 class Shipment(Base):
   __tablename__ = 'shipments'
@@ -116,38 +124,11 @@ class Shipment(Base):
   printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
   last_status = Column(String(255), nullable=True, index=True)
   last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  
-  # Adăugăm coloana pentru a putea încărca valoarea din VIEW
+
+  # --- CORECȚIA CRITICĂ ESTE AICI ---
   derived_status = Column(String(255), nullable=True)
   
-  # --- RELAȚIE STANDARD ȘI CORECTĂ ---
   order = relationship('Order', back_populates='shipments')
-
-
-
-class RomaniaAddress(Base):
-    __tablename__ = 'romania_addresses'
-    id = Column(Integer, primary_key=True)
-    judet = Column(String(255), index=True)
-    localitate = Column(String(255), index=True)
-    sector = Column(String(32), nullable=True, index=True)
-    tip_artera = Column(String(64), nullable=True, index=True)
-    nume_strada = Column(String(512), nullable=True, index=True)
-    cod_postal = Column(String(10), index=True)
-    __table_args__ = (
-        Index('ix_localitate_judet', 'localitate', 'judet'),
-    )
-
-class LineItem(Base):
-  __tablename__ = 'line_items'
-  id = Column(Integer, primary_key=True)
-  order_id = Column(Integer, ForeignKey('orders.id'))
-  sku = Column(String(128), index=True)
-  title = Column(Text)
-  quantity = Column(Integer)
-  order = relationship('Order', back_populates='line_items')
-
-
 
 class FulfillmentOrder(Base):
     __tablename__ = 'fulfillment_orders'
@@ -177,13 +158,8 @@ class PrintLogEntry(Base):
     awb = Column(String(64), index=True)
     log = relationship('PrintLog', back_populates='entries')
 
-
-
-# --- Modele Noi pentru Curieri ---
-
 class CourierAccount(Base):
     __tablename__ = 'courier_accounts'
-
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     account_key = Column(String(64), unique=True, nullable=False, index=True)
@@ -191,16 +167,11 @@ class CourierAccount(Base):
     tracking_url = Column(String(512), nullable=True)
     credentials = Column(JSONB, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    
     mappings = relationship("CourierMapping", back_populates="account")
-
 
 class CourierMapping(Base):
     __tablename__ = 'courier_mappings'
-
     id = Column(Integer, primary_key=True)
     shopify_name = Column(String(255), unique=True, nullable=False, index=True)
     account_key = Column(String(64), ForeignKey('courier_accounts.account_key'), nullable=False)
-    
-    # Adăugăm relația inversă către CourierAccount
     account = relationship("CourierAccount", back_populates="mappings")

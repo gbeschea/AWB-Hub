@@ -44,7 +44,7 @@ async def view(
     active_filters = {k: v for k, v in request.query_params.items() if v and v not in ['all', ''] and k not in ['page', 'page_size', 'sort_by']}
     
     filter_counts = await filter_service.get_filter_counts(db, active_filters)
-    paginated_orders, total_orders = await filter_service.apply_filters(db=db, **active_filters, page=page, page_size=page_size, sort_by=sort_by)
+    paginated_orders, total_orders = await filter_service.apply_filters(db=db, **active_filters)
     filter_dropdown_data = await get_filter_dropdown_data(db)
     
     cat_id_to_template_res = await db.execute(select(models.CourierCategory.id, models.CourierCategory.tracking_url_template).where(models.CourierCategory.tracking_url_template.isnot(None)))
