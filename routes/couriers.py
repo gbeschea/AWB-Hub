@@ -4,12 +4,15 @@ from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
+from fastapi.templating import Jinja2Templates
+
 
 from database import get_db
-from dependencies import get_templates
 from crud import couriers as crud_couriers
 
 router = APIRouter(prefix='/settings/couriers', tags=['Settings - Couriers'])
+templates = Jinja2Templates(directory="templates")
+
 
 DEFAULT_TRACKING_URLS = {
     "dpd": "https://tracking.dpd.ro/?shipmentNumber={awb}",
@@ -33,7 +36,7 @@ async def _parse_credentials_from_form(form_data: dict) -> dict:
     return credentials
 
 @router.get('', response_class=HTMLResponse, name="get_couriers_page")
-async def get_couriers_page(request: Request, db: AsyncSession = Depends(get_db), templates = Depends(get_templates)):
+async def get_couriers_page(request: Request, db: AsyncSession = Depends(get_db)):
     accounts = await crud_couriers.get_courier_accounts(db)
     mappings = await crud_couriers.get_courier_mappings(db)
     for acc in accounts:

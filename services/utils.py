@@ -1,6 +1,40 @@
+# services/utils.py
 from datetime import datetime, timezone, timedelta
-import models  # Asigură-te că acest import este aici
+from typing import Optional, List
+
+import models
 from settings import settings
+
+# --- FUNCȚII NOI ADĂUGATE ---
+
+def _dt(iso_str: Optional[str]) -> Optional[datetime]:
+    """Convertește un string ISO 8601 într-un obiect datetime cu fus orar."""
+    if not iso_str:
+        return None
+    try:
+        return datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
+
+def map_payment_method(gateways: List[str]) -> str:
+    """Map-ează gateway-urile de plată la o metodă simplificată (ex: ramburs, card)."""
+    if not gateways or not settings.PAYMENT_MAP:
+        return 'unknown'
+    
+    # Caută o potrivire în mapa de plăți definită în config
+    for method, shopify_names in settings.PAYMENT_MAP.items():
+        if any(g.lower() in [s.lower() for s in shopify_names] for g in gateways):
+            return method
+    return 'other'
+
+def courier_from_shopify(tags: List[str]) -> Optional[str]:
+    """Extrage numele curierului dintr-o listă de tag-uri ale comenzii."""
+    for tag in tags:
+        if tag.lower().startswith('courier_'):
+            return tag.split('_', 1)[1].lower()
+    return None
+
+# --- Funcția ta existentă (NU o șterge) ---
 
 def calculate_and_set_derived_status(order: models.Order):
     """
@@ -8,10 +42,16 @@ def calculate_and_set_derived_status(order: models.Order):
     pentru statusurile de anulare și refuz.
     """
     now = datetime.now(timezone.utc)
-    RAW_STATUS_TO_GROUP_KEY = {s.lower().strip(): group for group, (_, statuses) in settings.COURIER_STATUS_MAP.items() for s in statuses}
+    # Asigură-te că COURIER_STATUS_MAP este încărcat corect în settings
+    RAW_STATUS_TO_GROUP_KEY = {}
+    if settings.COURIER_STATUS_MAP:
+        RAW_STATUS_TO_GROUP_KEY = {
+            s.lower().strip(): group
+            for group, statuses in settings.COURIER_STATUS_MAP.items()
+            for s in statuses
+        }
     
     def get_shipment_sort_key(shipment):
-        # Prioritizează data, apoi ID-ul. None este tratat ca o dată foarte veche.
         return (shipment.fulfillment_created_at or datetime.min.replace(tzinfo=timezone.utc), shipment.id)
 
     latest_shipment = max(order.shipments, key=get_shipment_sort_key) if order.shipments else None

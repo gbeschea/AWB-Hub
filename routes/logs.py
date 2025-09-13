@@ -9,15 +9,15 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import select, func
 import models
 from database import get_db
-from dependencies import get_templates, get_pagination_numbers
 
 router = APIRouter(prefix='/logs', tags=['Logs'])
+templates = Jinja2Templates(directory="templates")
+
 
 @router.get("/print", response_class=HTMLResponse, name="get_print_logs_page")
 async def get_print_logs_page(
-    request: Request, db: AsyncSession = Depends(get_db),
-    templates: Jinja2Templates = Depends(get_templates), page: int = Query(1, ge=1)
-):
+    request: Request, db: AsyncSession = Depends(get_db), page: int = Query(1, ge=1)
+    ):
     page_size = 25
     logs_query = select(models.PrintLog).options(selectinload(models.PrintLog.entries)).order_by(models.PrintLog.created_at.desc())
     total_logs_res = await db.execute(select(func.count()).select_from(models.PrintLog))
@@ -40,12 +40,20 @@ async def get_print_logs_page(
             log.summary_items = []
 
     total_pages = (total_logs + page_size - 1) // page_size if total_logs > 0 else 1
-    page_numbers = get_pagination_numbers(page, total_pages)
+    # ADAUGĂ ACEASTĂ LOGICĂ AICI
+    # Calculează numerele paginilor pentru a le afișa în paginare
+    # Exemplu: afișează 2 pagini înainte și 2 după pagina curentă
+    start_page = max(1, page - 2)
+    end_page = min(total_pages, page + 2)
+    page_numbers = range(start_page, end_page + 1)
+    # SFÂRȘITUL BLOCULUI ADĂUGAT
             
     return templates.TemplateResponse("print_logs.html", {
         "request": request, "logs": paginated_logs, "page": page, 
         "total_pages": total_pages, "page_numbers": page_numbers
     })
+
+            
 
 @router.get("/print/download/{log_id}", response_class=FileResponse, name="download_printed_pdf")
 async def download_printed_pdf(log_id: int, db: AsyncSession = Depends(get_db)):

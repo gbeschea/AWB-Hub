@@ -8,19 +8,19 @@ from sqlalchemy.orm import selectinload
 
 import models
 from database import get_db
-from dependencies import get_templates
 from pydantic import BaseModel
 from services.address_service import validate_address_for_order
 
 
 
 router = APIRouter(prefix='/validation', tags=['Address Validation'])
+templates = Jinja2Templates(directory="templates")
+
 
 @router.get('', response_class=HTMLResponse, name="get_validation_page")
 async def get_address_validation_page(
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    templates: Jinja2Templates = Depends(get_templates)
+    db: AsyncSession = Depends(get_db)
 ):
     # Deocamdată, preluăm toate comenzile marcate ca invalide
     # Vom adăuga paginare și filtre mai târziu

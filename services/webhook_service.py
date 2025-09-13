@@ -4,8 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 import models
-from services.sync_service import _dt, map_payment_method, courier_from_shopify
-from services.utils import calculate_and_set_derived_status
+from services.utils import _dt, map_payment_method, courier_from_shopify
 from services.address_service import validate_address_for_order
 
 async def _create_or_update_order(db: AsyncSession, store_id: int, payload: Dict[str, Any]):

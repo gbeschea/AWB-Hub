@@ -1,41 +1,38 @@
-# dependencies.py
-from fastapi.templating import Jinja2Templates
-from datetime import datetime
-from zoneinfo import ZoneInfo
+# gbeschea/awb-hub/AWB-Hub-28035206bac3a3437048d87acde55b68d0fb6085/dependencies.py
 
-ROMANIA_TZ = ZoneInfo("Europe/Bucharest")
+# Importurile necesare, inclusiv Depends
+from fastapi import Request, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, or_
+import models
+from database import get_db
 
-def to_local_time(utc_dt: datetime):
-    if utc_dt is None:
-        return None
-    return utc_dt.astimezone(ROMANIA_TZ)
+async def get_stores_from_db(db: AsyncSession = Depends(get_db)):
+    """
+    Preia toate magazinele din baza de date, sortate după nume.
+    """
+    result = await db.execute(select(models.Store).order_by(models.Store.name))
+    stores = result.scalars().all()
+    return stores
 
-templates = Jinja2Templates(directory="templates")
-templates.env.filters['localtime'] = to_local_time
+async def get_unfulfilled_orders_count(db: AsyncSession = Depends(get_db)) -> int:
+    """
+    Numără comenzile care nu sunt încă "fulfilled" în Shopify.
+    """
+    count_result = await db.execute(
+        select(func.count(models.Order.id))
+        .where(models.Order.shopify_status != 'fulfilled')
+    )
+    count = count_result.scalar_one_or_none()
+    return count or 0
 
-def get_templates():
-    return templates
-
-# MODIFICARE: Am adăugat funcția de paginare
-def get_pagination_numbers(current_page: int, total_pages: int, context_size: int = 2) -> list:
-    """Generează o listă de numere de pagină pentru controalele de paginare."""
-    if total_pages <= 1:
-        return []
-
-    page_numbers = []
-    start_page = max(1, current_page - context_size)
-    end_page = min(total_pages, current_page + context_size)
-
-    if start_page > 1:
-        page_numbers.append(1)
-        if start_page > 2:
-            page_numbers.append('...')
-    
-    page_numbers.extend(range(start_page, end_page + 1))
-
-    if end_page < total_pages:
-        if end_page < total_pages - 1:
-            page_numbers.append('...')
-        page_numbers.append(total_pages)
-        
-    return page_numbers
+async def get_unprinted_orders_count(db: AsyncSession = Depends(get_db)) -> int:
+    """
+    Numără transporturile care au fost create dar nu au încă eticheta printată.
+    """
+    count_result = await db.execute(
+        select(func.count(models.Shipment.id))
+        .where(models.Shipment.printed_at.is_(None))
+    )
+    count = count_result.scalar_one_or_none()
+    return count or 0

@@ -5,18 +5,19 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from dependencies import get_templates
 from crud import stores as crud_stores
 
 router = APIRouter(prefix='/settings', tags=['Settings'])
+templates = Jinja2Templates(directory="templates")
+
 
 @router.get('', response_class=HTMLResponse, name="get_settings_page")
-async def get_settings_page(request: Request, templates: Jinja2Templates = Depends(get_templates)):
+async def get_settings_page(request: Request):
     """Afișează pagina principală de setări, care acționează ca un hub."""
     return templates.TemplateResponse("settings.html", {"request": request})
 
 @router.get('/stores', response_class=HTMLResponse, name="get_stores_page")
-async def get_stores_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):
+async def get_stores_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Afișează pagina de management al magazinelor."""
     stores = await crud_stores.get_stores(db)
     pii_source_options = ['shopify', 'metafield']

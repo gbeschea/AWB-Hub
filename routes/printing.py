@@ -13,13 +13,15 @@ import models
 from database import get_db
 from services import print_service
 from background import update_shopify_in_background
-from dependencies import get_templates
+from fastapi.templating import Jinja2Templates
 from settings import settings
 
 router = APIRouter(tags=['Print View'])
+templates = Jinja2Templates(directory="templates")
+
 
 @router.get("/print-view", response_class=HTMLResponse)
-async def get_print_view_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):
+async def get_print_view_page(request: Request, db: AsyncSession = Depends(get_db)):
     latest_shipment_subq = (select(models.Shipment.order_id, func.max(models.Shipment.id).label("max_id")).group_by(models.Shipment.order_id).alias("latest_shipment_subq"))
     supported_couriers_filter = or_(models.Shipment.courier.ilike('%dpd%'), models.Shipment.courier.ilike('%sameday%'))
     unprinted_counts_query = (

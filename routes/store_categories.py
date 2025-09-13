@@ -7,12 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import models
 from database import get_db
-from dependencies import get_templates
+from fastapi.templating import Jinja2Templates
 
-router = APIRouter(prefix='/categories', tags=['Store Categories'])
 
-@router.get('', response_class=HTMLResponse)
-async def get_categories_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):
+router = APIRouter()
+templates = Jinja2Templates(directory="templates")
+
+@router.get("/")
+async def get_categories_page(request: Request, db: AsyncSession = Depends(get_db)):
     categories_res = await db.execute(select(models.StoreCategory).options(joinedload(models.StoreCategory.stores)).order_by(models.StoreCategory.name))
     categories = categories_res.unique().scalars().all()
     stores_res = await db.execute(select(models.Store).order_by(models.Store.name))
