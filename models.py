@@ -57,8 +57,6 @@ class Store(Base):
   dpd_client_id = Column(String(255), nullable=True) # ADĂUGAT
 
 
-
-
 class Order(Base):
   __tablename__ = 'orders'
   id = Column(Integer, primary_key=True)
@@ -79,7 +77,6 @@ class Order(Base):
   last_sync_at = Column(TIMESTAMP(timezone=True), nullable=True)
   shopify_status = Column(String(64), nullable=True, index=True)
   fulfilled_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  derived_status = Column(String(255), nullable=True, index=True)
   shipping_name = Column(Text, nullable=True)
   shipping_address1 = Column(Text, nullable=True)
   shipping_address2 = Column(Text, nullable=True)
@@ -94,10 +91,39 @@ class Order(Base):
   processing_status = Column(String(32), default='pending_validation', index=True, nullable=False)
   assigned_courier = Column(String(64), nullable=True)
   is_on_hold_shopify = Column(Boolean, default=False, nullable=False, index=True)
+  
+  # Adăugăm coloana pentru a putea încărca valoarea din VIEW, dar NU o calculăm aici
+  derived_status = Column(String(255), nullable=True)
+  
+  # --- RELAȚII STANDARD ȘI CORECTE ---
   store = relationship('Store', back_populates='orders')
   line_items = relationship('LineItem', back_populates='order', cascade='all, delete-orphan')
   shipments = relationship('Shipment', back_populates='order', cascade='all, delete-orphan')
   fulfillment_orders = relationship('FulfillmentOrder', back_populates='order', cascade='all, delete-orphan')
+
+
+class Shipment(Base):
+  __tablename__ = 'shipments'
+  id = Column(Integer, primary_key=True)
+  order_id = Column(Integer, ForeignKey('orders.id'))
+  fulfillment_created_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  shopify_fulfillment_id = Column(String(50), nullable=True, index=True)
+  awb = Column(String(64), index=True)
+  courier_specific_data = Column(JSON, nullable=True)
+  courier = Column(String(64), index=True)
+  account_key = Column(String(32))
+  paper_size = Column(String(16))
+  printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+  last_status = Column(String(255), nullable=True, index=True)
+  last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  
+  # Adăugăm coloana pentru a putea încărca valoarea din VIEW
+  derived_status = Column(String(255), nullable=True)
+  
+  # --- RELAȚIE STANDARD ȘI CORECTĂ ---
+  order = relationship('Order', back_populates='shipments')
+
+
 
 class RomaniaAddress(Base):
     __tablename__ = 'romania_addresses'
@@ -121,22 +147,7 @@ class LineItem(Base):
   quantity = Column(Integer)
   order = relationship('Order', back_populates='line_items')
 
-class Shipment(Base):
-  __tablename__ = 'shipments'
-  id = Column(Integer, primary_key=True)
-  order_id = Column(Integer, ForeignKey('orders.id'))
-  fulfillment_created_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  shopify_fulfillment_id = Column(String(50), nullable=True, index=True)
-  awb = Column(String(64), index=True)
-  courier_specific_data = Column(JSON, nullable=True)
-  courier = Column(String(64), index=True)
-  account_key = Column(String(32))
-  paper_size = Column(String(16))
-  printed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
-  last_status = Column(String(255), nullable=True, index=True)
-  last_status_at = Column(TIMESTAMP(timezone=True), nullable=True)
-  derived_status = Column(String(255), nullable=True, index=True)
-  order = relationship('Order', back_populates='shipments')
+
 
 class FulfillmentOrder(Base):
     __tablename__ = 'fulfillment_orders'
@@ -183,7 +194,7 @@ class CourierAccount(Base):
     
     mappings = relationship("CourierMapping", back_populates="account")
 
-    
+
 class CourierMapping(Base):
     __tablename__ = 'courier_mappings'
 

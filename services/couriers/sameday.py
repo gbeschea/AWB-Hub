@@ -9,22 +9,36 @@ from datetime import datetime, timedelta, timezone
 
 from .common import BaseCourierService, TrackingStatus
 
+# --- RATE LIMITER GLOBAL PENTRU SAMEDAY ---
+# Aceste variabile sunt partajate pentru a limita viteza tuturor cererilor către Sameday
+_last_request_time: float = 0.0
+_rate_limit_interval: float = 0.5  # Așteaptă cel puțin 0.5 secunde între cereri
+_rate_limit_lock = asyncio.Lock()
+
+async def _apply_sameday_rate_limit():
+    """Așteaptă dacă este necesar pentru a respecta limita de request-uri."""
+    async with _rate_limit_lock:
+        now = time.monotonic()
+        elapsed = now - _last_request_time
+        if elapsed < _rate_limit_interval:
+            await asyncio.sleep(_rate_limit_interval - elapsed)
+        # Actualizăm timpul ultimei cereri DUPĂ ce am așteptat
+        globals()['_last_request_time'] = time.monotonic()
+
+
 def _parse_sameday_date(date_str: Optional[str]) -> Optional[datetime]:
     if not date_str: return None
     try:
-        # Formatul standard ISO 8601
         return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
     except (ValueError, TypeError):
         try:
-            # Format alternativ întâlnit uneori
             return datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
             return None
 
 class SamedayCourierService(BaseCourierService):
-    """Sameday AWB Tracking Service with proper token management."""
+    """Sameday AWB Tracking Service with authentication and rate limiting."""
 
-    # Variabile de clasă pentru a stoca token-ul partajat
     _token: Optional[str] = None
     _token_expiry: datetime = datetime.min.replace(tzinfo=timezone.utc)
     _token_lock = asyncio.Lock()
@@ -37,41 +51,31 @@ class SamedayCourierService(BaseCourierService):
         self.api_url = "https://api.sameday.ro"
 
         if not self.username or not self.password:
-            raise ValueError("Username and password are required for Sameday service.")
+            raise ValueError(f"Username and password are required for Sameday account key: {account_key}.")
 
     async def _get_token(self) -> Optional[str]:
-        """
-        Obține un token de autentificare, refolosindu-l pe cel existent dacă este valid.
-        Acest mecanism previne erorile de 'Too Many Requests'.
-        """
         async with self._token_lock:
-            # Verificăm dacă token-ul existent mai este valid (expiră în 60 min)
             if self._token and datetime.now(timezone.utc) < self._token_expiry:
                 return self._token
 
-            # Dacă token-ul a expirat sau nu există, cerem unul nou
             logging.info(f"Se solicită un token nou de la Sameday pentru user: {self.username}")
             try:
+                await _apply_sameday_rate_limit() # Aplicăm limitare și la autentificare
+                headers = {'X-Auth-Username': self.username, 'X-Auth-Password': self.password}
                 async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{self.api_url}/api/authenticate",
-                        json={"username": self.username, "password": self.password}
-                    )
+                    url = f"{self.api_url}/api/authenticate"
+                    response = await client.post(url, headers=headers)
                     response.raise_for_status()
                     data = response.json()
                     
                     self._token = data.get("token")
-                    # Setăm timpul de expirare cu 5 minute mai devreme, pentru siguranță
                     self._token_expiry = datetime.now(timezone.utc) + timedelta(minutes=55)
                     
-                    logging.info("Token Sameday obținut cu succes.")
+                    logging.info(f"Token Sameday obținut cu succes pentru user: {self.username}")
                     return self._token
-
-            except httpx.HTTPStatusError as e:
+            except Exception as e:
                 logging.error(f"Autentificare Sameday eșuată pentru user '{self.username}': {e}")
-                # Resetăm token-ul în caz de eroare pentru a forța reîncercarea data viitoare
                 self._token = None
-                self._token_expiry = datetime.min.replace(tzinfo=timezone.utc)
                 return None
 
     async def track(self, awb: str) -> Optional[TrackingStatus]:
@@ -82,26 +86,26 @@ class SamedayCourierService(BaseCourierService):
         headers = {"X-Auth-Token": token}
         
         try:
-            # Folosim endpoint-ul corect din aplicația veche
-            url = f"{self.api_url}/api/awb/track/{awb}"
+            await _apply_sameday_rate_limit() # Aplicăm limitarea de viteză ÎNAINTE de cerere
+            
+            url = f"{self.api_url}/api/client/awb/{awb}/status"
             async with httpx.AsyncClient() as client:
                 track_response = await client.get(url, headers=headers)
+                
+                if track_response.status_code == 404:
+                    return TrackingStatus(raw_status="AWB inexistent (client)")
+                
                 track_response.raise_for_status()
                 data = track_response.json()
 
-                history = data.get("awbHistory", [])
+                history = data.get("expeditionHistory", [])
                 if not history:
-                    return TrackingStatus(raw_status="AWB negăsit sau fără istoric")
+                    return TrackingStatus(raw_status="AWB generat, fără istoric")
 
-                # Găsim ultimul eveniment din istoric
-                latest_event = max(history, key=lambda event: _parse_sameday_date(event.get('eventDate')) or datetime.min.replace(tzinfo=timezone.utc))
-                raw_status = latest_event.get("status", "Status necunoscut")
+                latest_event = max(history, key=lambda event: _parse_sameday_date(event.get('statusDate')) or datetime.min.replace(tzinfo=timezone.utc))
+                raw_status = latest_event.get('statusLabel', "Status necunoscut")
                 
                 return TrackingStatus(raw_status=raw_status)
-
-        except httpx.HTTPStatusError as e:
-            logging.error(f"Eroare HTTP Sameday pentru AWB {awb}: {e.response.status_code} - {e.response.text}")
-            return TrackingStatus(raw_status=f"Eroare HTTP {e.response.status_code}")
         except Exception as e:
             logging.error(f"Eroare generală la tracking Sameday AWB {awb}: {e}")
             return TrackingStatus(raw_status="Eroare generală tracking")

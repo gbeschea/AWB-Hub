@@ -12,19 +12,6 @@ from settings import settings
 from .couriers.common import TrackingStatus
 from .couriers import get_courier_service
 
-def map_status(raw_status: str, account_key: str) -> str:
-    # Funcția map_status rămâne neschimbată
-    raw_status_lower = raw_status.lower().strip()
-    courier_name = account_key.lower() if account_key else ''
-    if settings.COURIER_STATUS_MAP:
-        courier_map = settings.COURIER_STATUS_MAP.get(courier_name, {})
-        for derived, raw_list in courier_map.items():
-            if any(keyword.lower() in raw_status_lower for keyword in raw_list):
-                return derived
-    if "livrat" in raw_status_lower or "delivered" in raw_status_lower: return "livrat"
-    if "refuzat" in raw_status_lower or "refused" in raw_status_lower: return "refuzat"
-    if "retur" in raw_status_lower or "return" in raw_status_lower: return "retur"
-    return "in_tranzit"
 
 # Worker-ul primește serviciul gata creat
 async def worker(courier_service, shipment: models.Shipment):
@@ -81,7 +68,6 @@ async def track_and_update_shipments(db: AsyncSession, full_sync: bool = False):
         if response and shipment_id:
             shipment = shipment_map.get(shipment_id)
             if shipment:
-                derived_status = map_status(response.raw_status, shipment.account_key)
                 shipment.last_status = response.raw_status
                 shipment.derived_status = derived_status
                 updated_count += 1
