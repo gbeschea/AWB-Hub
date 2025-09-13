@@ -3,13 +3,13 @@
         <input type="checkbox" class="order-checkbox" value="{{ order.id }}">
     </td>
     <td>
-        <a href="https://{{ order.store_name }}/admin/orders/{{ order.shopify_order_id }}" target="_blank">
+        <a href="https://{{ order.store_name }}/admin/orders/{{ order.shopify_order_id | urlencode }}" target="_blank">
             {{ order.name }}
         </a>
         <br>
         <small class="text-muted">{{ order.customer }}</small>
     </td>
-    <td>{{ order.created_at.strftime('%d-%m-%Y %H:%M') }}</td>
+    <td>{{ order.created_at.strftime('%d-%m-%Y %H:%M') if order.created_at else 'N/A' }}</td>
     <td>{{ order.store_name }}</td>
     <td>
         <span class="status-badge status-{{ order.financial_status | lower }}">
@@ -34,26 +34,17 @@
                         <a href="#" class="track-awb" data-awb="{{ shipment.awb }}" data-courier="{{ shipment.courier }}">
                             {{ shipment.awb or 'N/A' }}
                         </a>
-                        <br>
-                        <small class="text-muted">{{ shipment.courier }}</small>
+                        <small class="text-muted">({{ shipment.courier }})</small>
                     </div>
                     <div class="status-info mt-1">
-                        <strong>Status:</strong>
-                        {% set status_class = shipment.shipment_derived_status or 'in_tranzit' %}
+                        {% set status_class = shipment.derived_status or 'in_tranzit' %}
                         <span class="status-badge status-{{ status_class }}">
-                             {{ shipment.last_status or 'În tranzit' }}
+                             {{ status_class.replace('_', ' ') | title }}
                         </span>
-                    </div>
-                    <div class="print-info mt-1">
-                        {% if shipment.printed_at %}
-                            <small class="text-success">
-                                <i class="fas fa-print"></i> Printat: {{ shipment.printed_at.strftime('%d-%m %H:%M') }}
-                            </small>
-                        {% else %}
-                            <small class="text-danger">
-                                <i class="fas fa-times-circle"></i> Neprintat
-                            </small>
-                        {% endif %}
+                        <br>
+                        <small class="text-muted courier-status-message">
+                            <em>{{ shipment.last_status or 'În tranzit' }}</em>
+                        </small>
                     </div>
                 </div>
                 {% if not loop.last %}<hr class="my-1">{% endif %}

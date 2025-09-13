@@ -170,20 +170,34 @@
     <div class="main-table-wrapper">
         <table class="main-table striped">
             <thead>
-                {% macro sort_link(col, text) %}{% set next_sort = col + '_asc' if request.query_params.get('sort_by') != col + '_asc' else col + '_desc' %}<a href="{{ request.url.remove_query_params(['sort_by', 'page']).include_query_params(sort_by=next_sort) }}">{{ text }}{% if request.query_params.get('sort_by', '').startswith(col) %}<span>{{ '↓' if 'desc' in request.query_params.get('sort_by') else '↑' }}</span>{% endif %}</a>{% endmacro %}
                 <tr>
-                    <th data-column-key="selector" style="width: 40px;"><input type="checkbox" id="selectAllCheckbox"></th>
-                    <th data-column-key="comanda">{{ sort_link('order_name', 'Comanda') }}</th>
-                    <th data-column-key="data">{{ sort_link('created_at', 'Data') }}</th>
-                    <th data-column-key="status">Status AWB Hub</th>
-                    <th data-column-key="payment_status">Payment Status</th>
-                    <th data-column-key="fulfillment_status">Fulfillment Status</th>
-                    <th data-column-key="produse">{{ sort_link('line_items_group', 'Produse') }}</th>
-                    <th data-column-key="awb">{{ sort_link('awb', 'AWB') }}</th>
-                    <th data-column-key="status_curier">{{ sort_link('awb_status', 'Status Curier') }}</th>
-                    <th data-column-key="printat">Printat?</th>
-                    <th data-column-key="printat_la">{{ sort_link('printed_at', 'Printat la') }}</th>
-                    <th data-column-key="actiuni">Acțiuni</th>
+                    <th style="width: 3%;"><input type="checkbox" id="select-all-orders"></th>
+                    
+                    {% set sort_key, _, sort_dir = sort_by.rpartition('_') %}
+
+                    <th style="width: 20%;">
+                        <a href="{{ get_sort_url('order_name') }}">Comanda
+                            {% if sort_key == 'order_name' %}<i class="fas fa-sort-{{ sort_dir }}"></i>{% endif %}
+                        </a>
+                    </th>
+                    
+                    <th style="width: 12%;">
+                        <a href="{{ get_sort_url('created_at') }}">Data
+                            {% if sort_key == 'created_at' %}<i class="fas fa-sort-{{ sort_dir }}"></i>{% endif %}
+                        </a>
+                    </th>
+                    
+                    <th style="width: 10%;">Magazin</th>
+                    <th style="width: 10%;">Status Plată</th>
+                    
+                    <th style="width: 15%;">
+                        <a href="{{ get_sort_url('order_status') }}">Status Comandă
+                            {% if sort_key == 'order_status' %}<i class="fas fa-sort-{{ sort_dir }}"></i>{% endif %}
+                        </a>
+                    </th>
+                    
+                    <th style="width: 20%;">AWB & Status Curier</th>
+                    <th style="width: 10%;">Acțiuni</th>
                 </tr>
             </thead>
             <tbody>
