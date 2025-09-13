@@ -1,84 +1,74 @@
-# routes/orders.py
-
+import models
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from starlette.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import desc, asc, select
+from sqlalchemy.orm import Session, selectinload
+from database import get_db  # <--- THIS LINE IS THE FIX
+from dependencies import get_flash_messages, get_stores_from_db, get_unfulfilled_orders_count, get_unprinted_orders_count
+from typing import Optional
 
-import models
-from database import get_db
-from services import filter_service
+# ... (rest of the file remains the same)
 
-templates = Jinja2Templates(directory="templates")
 router = APIRouter()
+templates = Jinja2Templates(directory="templates")
 
-@router.get("/view", response_class=HTMLResponse, name="view_orders")
-async def view(
+SORTABLE_COLUMNS = {
+    "order_number": models.Order.order_number,
+    "order_date": models.Order.order_date,
+    "status": models.Order.status,
+    "customer_name": models.Order.customer_name,
+    "awb": models.Order.awb,
+}
+
+@router.get("/", response_class=HTMLResponse)
+async def get_orders(
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    page: int = 1,
-    page_size: int = 50,
-    store: str = "all",
-    category: str = "all",
-    fulfillment_status: str = "all",
-    financial_status: str = "all",
-    derived_status: str = "all",
-    address_status: str = "all",
-    courier: str = "all",
-    printed_status: str = "all",
-    courier_status_group: str = "all",
-    order_q: str = None,
-    date_filter_type: str = "created_at",
-    date_from: str = None,
-    date_to: str = None,
-    sort_by: str = "created_at_desc",
-    sku: str = None,
+    db: Session = Depends(get_db),
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = "desc",
+    flash_messages: dict = Depends(get_flash_messages),
+    stores=Depends(get_stores_from_db),
+    unfulfilled_count=Depends(get_unfulfilled_orders_count),
+    unprinted_count=Depends(get_unprinted_orders_count),
 ):
-    active_filters = {
-        "page": page, "page_size": page_size, "store": store, "category": category,
-        "fulfillment_status": fulfillment_status, "financial_status": financial_status,
-        "derived_status": derived_status, "address_status": address_status,
-        "courier": courier, "printed_status": printed_status,
-        "courier_status_group": courier_status_group, "order_q": order_q,
-        "date_filter_type": date_filter_type, "date_from": date_from,
-        "date_to": date_to, "sort_by": sort_by, "sku": sku
-    }
+    """
+    Handles displaying the main orders page with server-side sorting.
+    """
+    query = select(models.Order).options(selectinload(models.Order.shipments))
 
-    def get_sort_url(sort_key_name: str):
-        """Helper function to generate sorting URLs."""
-        current_sort_key, _, current_sort_dir = sort_by.rpartition('_')
-        if current_sort_key == sort_key_name and current_sort_dir == 'desc':
-            next_sort_dir = 'asc'
+    # Apply sorting
+    if sort_by in SORTABLE_COLUMNS:
+        column = SORTABLE_COLUMNS[sort_by]
+        if sort_order == "asc":
+            query = query.order_by(asc(column))
         else:
-            next_sort_dir = 'desc'
-        
-        new_sort_by = f"{sort_key_name}_{next_sort_dir}"
-        
-        # Rebuild query parameters safely
-        new_params = request.query_params._dict.copy()
-        new_params['sort_by'] = new_sort_by
-        return request.url.replace(query=None).include_query_params(**new_params)
+            query = query.order_by(desc(column))
+    else:
+        query = query.order_by(models.Order.order_date.desc())
 
-    filter_counts = await filter_service.get_filter_counts(db, active_filters)
-    paginated_orders, total_orders = await filter_service.apply_filters_and_get_orders(db=db, **active_filters)
-    
-    total_pages = (total_orders + page_size - 1) // page_size
-    store_categories = (await db.execute(select(models.StoreCategory))).scalars().all()
+    result = await db.execute(query)
+    orders = result.scalars().all()
+
+    # Get unique statuses for the filter dropdown
+    status_query = select(models.Order.status).distinct()
+    status_result = await db.execute(status_query)
+    statuses = status_result.scalars().all()
+    unique_statuses = sorted([status for status in statuses if status])
 
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "orders": paginated_orders,
-            "total_orders": total_orders,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-            "active_filters": active_filters,
-            "sort_by": sort_by,
-            "filter_counts": filter_counts,
-            "store_categories": store_categories,
-            "get_sort_url": get_sort_url # Pass the helper function to the template
+            "orders": orders,
+            "stores": stores,
+            "unique_statuses": unique_statuses,
+            "flash_messages": flash_messages,
+            "unfulfilled_count": unfulfilled_count,
+            "unprinted_count": unprinted_count,
+            "current_sort_by": sort_by,
+            "current_sort_order": sort_order,
         },
     )
+
+# ... (rest of the file)

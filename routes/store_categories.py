@@ -2,14 +2,27 @@
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import joinedload
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 import models
 from database import get_db
-from dependencies import get_templates
 
-router = APIRouter(prefix='/categories', tags=['Store Categories'])
+router = APIRouter()
+templates = Jinja2Templates(directory="templates")
+
+@router.get("/", response_class=HTMLResponse)
+async def get_categories_page(request: Request, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(models.StoreCategory))
+    categories = result.scalars().all()
+    return templates.TemplateResponse("categories.html", {"request": request, "categories": categories})
+
+@router.post("/add", response_class=RedirectResponse)
+async def add_store_category(name: str = Form(...), db: AsyncSession = Depends(get_db)):
+    new_category = models.StoreCategory(name=name)
+    db.add(new_category)
+    await db.commit()
+    return RedirectResponse(url="/categories", status_code=303)
+
 
 @router.get('', response_class=HTMLResponse)
 async def get_categories_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):

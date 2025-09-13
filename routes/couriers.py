@@ -1,15 +1,19 @@
-# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/routes/couriers.py
-
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-import json
-
+# routes/couriers.py
+from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+import models
 from database import get_db
-from dependencies import get_templates
-from crud import couriers as crud_couriers
+from services.courier_service import get_courier_service
 
-router = APIRouter(prefix='/settings/couriers', tags=['Settings - Couriers'])
+router = APIRouter()
+templates = Jinja2Templates(directory="templates")
+
+@router.get("/", response_class=HTMLResponse)
+async def get_couriers_page(request: Request, db: Session = Depends(get_db)):
+    couriers = db.query(models.CourierAccount).all()
+    return templates.TemplateResponse("settings_couriers.html", {"request": request, "couriers": couriers})
 
 DEFAULT_TRACKING_URLS = {
     "dpd": "https://tracking.dpd.ro/?shipmentNumber={awb}",

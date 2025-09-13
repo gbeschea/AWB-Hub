@@ -1,19 +1,24 @@
-# gbeschea/awb-hub/AWB-Hub-2de5efa965cc539c6da369d4ca8f3d17a4613f7f/routes/settings.py
-
-from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+# routes/settings.py
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+import models
 from database import get_db
-from dependencies import get_templates
-from crud import stores as crud_stores
 
-router = APIRouter(prefix='/settings', tags=['Settings'])
+router = APIRouter()
+templates = Jinja2Templates(directory="templates")
 
-@router.get('', response_class=HTMLResponse, name="get_settings_page")
-async def get_settings_page(request: Request, templates: Jinja2Templates = Depends(get_templates)):
-    """Afișează pagina principală de setări, care acționează ca un hub."""
-    return templates.TemplateResponse("settings.html", {"request": request})
+@router.get("/", response_class=HTMLResponse)
+async def get_settings_page(request: Request, db: Session = Depends(get_db)):
+    stores = db.query(models.Store).all()
+    courier_accounts = db.query(models.CourierAccount).all()
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "stores": stores,
+        "courier_accounts": courier_accounts
+    })
+
 
 @router.get('/stores', response_class=HTMLResponse, name="get_stores_page")
 async def get_stores_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):

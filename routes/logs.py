@@ -11,7 +11,16 @@ import models
 from database import get_db
 from dependencies import get_templates, get_pagination_numbers
 
-router = APIRouter(prefix='/logs', tags=['Logs'])
+router = APIRouter()
+# Initialize templates directly in the file
+templates = Jinja2Templates(directory="templates")
+
+@router.get("/", response_class=HTMLResponse)
+async def get_logs_page(request: Request, db: Session = Depends(get_db)):
+    # ... (rest of the file is fine)
+    logs = db.query(models.PrintLog).order_by(desc(models.PrintLog.print_time)).all()
+    return templates.TemplateResponse("print_logs.html", {"request": request, "logs": logs})
+
 
 @router.get("/print", response_class=HTMLResponse, name="get_print_logs_page")
 async def get_print_logs_page(

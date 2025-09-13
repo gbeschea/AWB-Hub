@@ -1,44 +1,19 @@
 # routes/validation.py
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-
-import models
+from sqlalchemy.orm import Session
+from services.address_service import get_all_unvalidated_orders
 from database import get_db
-from dependencies import get_templates
-from pydantic import BaseModel
-from services.address_service import validate_address_for_order
 
+router = APIRouter()
+templates = Jinja2Templates(directory="templates")
 
+@router.get("/", response_class=HTMLResponse)
+async def get_validation_page(request: Request, db: Session = Depends(get_db)):
+    orders = get_all_unvalidated_orders(db)
+    return templates.TemplateResponse("validation.html", {"request": request, "orders": orders})
 
-router = APIRouter(prefix='/validation', tags=['Address Validation'])
-
-@router.get('', response_class=HTMLResponse, name="get_validation_page")
-async def get_address_validation_page(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    templates: Jinja2Templates = Depends(get_templates)
-):
-    # Deocamdată, preluăm toate comenzile marcate ca invalide
-    # Vom adăuga paginare și filtre mai târziu
-    invalid_orders_query = (
-        select(models.Order)
-        .options(selectinload(models.Order.store))
-        .where(models.Order.address_status == 'invalid')
-        .order_by(models.Order.created_at.desc())
-        .limit(100) # Adăugăm o limită pentru a nu încărca prea multe deodată
-    )
-    
-    result = await db.execute(invalid_orders_query)
-    invalid_orders = result.scalars().all()
-
-    return templates.TemplateResponse("validation.html", {
-        "request": request,
-        "orders": invalid_orders,
-    })
 
 @router.post("/{order_id}/mark-valid", response_class=JSONResponse)
 async def mark_order_as_valid(order_id: int, db: AsyncSession = Depends(get_db)):

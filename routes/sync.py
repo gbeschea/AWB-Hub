@@ -1,14 +1,18 @@
 # routes/sync.py
-import logging
+from fastapi import APIRouter, Depends, BackgroundTasks, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import APIRouter, Depends, Form, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse
-from starlette.background import BackgroundTasks
 from database import get_db
-from services import sync_service
-from websocket_manager import manager
+from services.sync_service import sync_all_stores
 
-router = APIRouter(prefix='/sync', tags=['Sync'])
+router = APIRouter()
+
+@router.post("/all", response_class=RedirectResponse)
+async def sync_all_stores_route(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    background_tasks.add_task(sync_all_stores, db)
+    # This is a background task, so we redirect immediately.
+    # A flash message could be added to inform the user.
+    return RedirectResponse(url="/", status_code=303)
 
 async def run_sync_task(request: Request, sync_function, db: AsyncSession, *args, **kwargs):
     request.app.state.is_syncing = True

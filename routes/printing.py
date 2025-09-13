@@ -16,7 +16,9 @@ from background import update_shopify_in_background
 from dependencies import get_templates
 from settings import settings
 
-router = APIRouter(tags=['Print View'])
+router = APIRouter()
+# Initialize templates directly in the file
+templates = Jinja2Templates(directory="templates")
 
 @router.get("/print-view", response_class=HTMLResponse)
 async def get_print_view_page(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):
