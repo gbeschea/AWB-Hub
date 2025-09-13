@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload, joinedload, aliased
+from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.sql.selectable import Select
-from sqlalchemy import select, and_, or_, func, desc, asc, case, literal_column, table, column
+from sqlalchemy import select, and_, or_, func, desc, asc, table, column
 import models
 from settings import settings
 
@@ -29,20 +29,19 @@ def get_shipments_view():
 # --- End Helper Functions ---
 
 
-def _apply_filters_to_query(base_query: Select, filters: Dict[str, Any], orders_view, shipments_view) -> Select:
-    """Aplică condițiile de join și filtrare pe o interogare existentă."""
+def _apply_filters_to_core_query(base_query: Select, filters: Dict[str, Any], orders_view, shipments_view) -> Select:
+    """Aplică condițiile de join și filtrare pe o interogare Core SQL (nu ORM)."""
     query = base_query.outerjoin(shipments_view, orders_view.c.id == shipments_view.c.order_id)
 
     conditions = []
-    
-    # Adaugă join-uri și condiții de bază
+
     if filters.get('store') and filters['store'] != 'all':
         query = query.join(models.Store, orders_view.c.store_id == models.Store.id)
         conditions.append(models.Store.domain == filters['store'])
 
     if filters.get('category') and filters['category'] != 'all' and filters['category'].isdigit():
-        # Asigură-te că join-ul cu 'stores' există deja dacă e necesar
-        if not any(isinstance(from_obj, type(models.Store.__table__)) for from_obj in query.froms):
+        # Asigură-te că join-ul cu 'stores' există deja
+        if not any(str(j.right) == str(models.Store.__table__) for j in getattr(query, '_from_obj', [])):
              query = query.join(models.Store, orders_view.c.store_id == models.Store.id)
         query = query.join(models.store_category_map, models.Store.id == models.store_category_map.c.store_id)
         conditions.append(models.store_category_map.c.category_id == int(filters['category']))
@@ -51,14 +50,17 @@ def _apply_filters_to_query(base_query: Select, filters: Dict[str, Any], orders_
         query = query.join(models.LineItem, orders_view.c.id == models.LineItem.order_id)
         conditions.append(models.LineItem.sku.ilike(f"%{filters['sku']}%"))
 
-    # Condiții de filtrare simple
+    # Filtre simple mapate pe coloanele din vizualizări
     simple_filters = {
         'address_status': orders_view.c.address_status,
         'financial_status': orders_view.c.financial_status,
-        'shopify_status': orders_view.c.shopify_status,
         'derived_status': orders_view.c.derived_status,
         'courier': shipments_view.c.courier
     }
+    # Filtrul pentru fulfillment_status folosește o coloană cu nume diferit în VIEW
+    if (value := filters.get('fulfillment_status')) and value != 'all':
+        conditions.append(orders_view.c.shopify_status == value)
+
     for key, col in simple_filters.items():
         if (value := filters.get(key)) and value != 'all':
             conditions.append(col == value)
@@ -100,7 +102,7 @@ def _apply_filters_to_query(base_query: Select, filters: Dict[str, Any], orders_
 
 
 async def apply_filters(db: AsyncSession, **kwargs) -> Tuple[List[models.Order], int]:
-    """Preia și paginează comenzile, folosind VIEW-uri în mod consistent."""
+    """Preia și paginează comenzile, folosind o strategie robustă cu VIEW-uri."""
     page, page_size, sort_by = kwargs.get('page', 1), kwargs.get('page_size', 50), kwargs.get('sort_by', 'created_at_desc')
     active_filters = {k: v for k, v in kwargs.items() if k not in ['db', 'page', 'page_size', 'sort_by'] and v and v != 'all'}
     active_filters['sort_by'] = sort_by
@@ -108,17 +110,17 @@ async def apply_filters(db: AsyncSession, **kwargs) -> Tuple[List[models.Order],
     orders_view = get_orders_view()
     shipments_view = get_shipments_view()
 
-    # Pas 1: Numără totalul de rezultate filtrate
+    # Pas 1: Numără totalul de rezultate filtrate (folosind VIEW-uri)
     count_q = select(func.count(orders_view.c.id.distinct())).select_from(orders_view)
-    count_q = _apply_filters_to_query(count_q, active_filters, orders_view, shipments_view)
+    count_q = _apply_filters_to_core_query(count_q, active_filters, orders_view, shipments_view)
     total_count = await db.scalar(count_q)
 
-    if total_count == 0:
+    if not total_count:
         return [], 0
 
-    # Pas 2: Obține ID-urile pentru pagina curentă
+    # Pas 2: Obține ID-urile ordonate pentru pagina curentă (folosind VIEW-uri)
     ids_q = select(orders_view.c.id).select_from(orders_view)
-    ids_q = _apply_filters_to_query(ids_q, active_filters, orders_view, shipments_view)
+    ids_q = _apply_filters_to_core_query(ids_q, active_filters, orders_view, shipments_view)
     
     sort_key, _, sort_dir = sort_by.rpartition('_')
     sort_direction = desc if sort_dir == 'desc' else asc
@@ -138,15 +140,16 @@ async def apply_filters(db: AsyncSession, **kwargs) -> Tuple[List[models.Order],
     if not paginated_order_ids:
         return [], total_count
 
-    # Pas 3: Încarcă obiectele ORM complete pentru ID-urile obținute
+    # Pas 3: Încarcă obiectele ORM complete pentru ID-urile obținute (fără sortare complexă)
     results_q = select(models.Order).where(models.Order.id.in_(paginated_order_ids)).options(
         selectinload(models.Order.shipments),
         selectinload(models.Order.line_items),
         joinedload(models.Order.store)
     )
 
-    # Re-ordonează rezultatele în aceeași ordine ca ID-urile paginate
     all_results = (await db.execute(results_q)).unique().scalars().all()
+    
+    # Pas 4: Reordonează obiectele ORM în ordinea corectă
     result_map = {order.id: order for order in all_results}
     ordered_results = [result_map[id] for id in paginated_order_ids if id in result_map]
 
@@ -158,8 +161,7 @@ async def get_filter_counts(db: AsyncSession, active_filters: Dict[str, Any]) ->
     counts = {}
     filter_groups = {
         'address_status': 'address_status', 'financial_status': 'financial_status',
-        'derived_status': 'derived_status', 'courier': 'courier',
-        'printed_status': 'printed_status', 'courier_status_group': 'courier_status_group'
+        'derived_status': 'derived_status', 'courier': 'courier'
     }
 
     orders_view = get_orders_view()
@@ -168,18 +170,17 @@ async def get_filter_counts(db: AsyncSession, active_filters: Dict[str, Any]) ->
     for group_key, col_name in filter_groups.items():
         temp_filters = {k: v for k, v in active_filters.items() if k != group_key}
         
-        subq = select(orders_view.c.id).select_from(orders_view)
-        subq = _apply_filters_to_query(subq, temp_filters, orders_view, shipments_view).subquery()
+        subq_base = select(orders_view.c.id).select_from(orders_view)
+        subq = _apply_filters_to_core_query(subq_base, temp_filters, orders_view, shipments_view).subquery()
 
-        all_count_res = await db.execute(select(func.count()).select_from(subq))
-        group_counts = {'all': all_count_res.scalar_one() or 0}
+        group_counts = {'all': (await db.scalar(select(func.count()).select_from(subq))) or 0}
 
         count_q = None
         if group_key == 'courier':
             count_q = select(shipments_view.c.courier, func.count(shipments_view.c.order_id.distinct())) \
                 .select_from(shipments_view).where(shipments_view.c.order_id.in_(select(subq.c.id))) \
                 .group_by(shipments_view.c.courier)
-        elif group_key in ['address_status', 'financial_status', 'derived_status']:
+        else:
             count_q = select(orders_view.c[col_name], func.count()) \
                 .select_from(orders_view).where(orders_view.c.id.in_(select(subq.c.id))) \
                 .group_by(orders_view.c[col_name])
@@ -190,9 +191,6 @@ async def get_filter_counts(db: AsyncSession, active_filters: Dict[str, Any]) ->
                 if key is not None: group_counts[str(key)] = count
         
         counts[group_key] = group_counts
-
-    # Logica pentru 'printed_status' și 'courier_status_group' rămâne separată
-    # ...
 
     stores_res = await db.execute(select(models.Store.id, models.Store.name).where(models.Store.is_active == True))
     stores = [{"id": r[0], "name": r[1]} for r in stores_res.all()]
