@@ -13,11 +13,9 @@ from dependencies import get_templates, get_pagination_numbers
 
 router = APIRouter(prefix='/logs', tags=['Logs'])
 
-@router.get("/print", response_class=HTMLResponse, name="get_print_logs_page")
-async def get_print_logs_page(
-    request: Request, db: AsyncSession = Depends(get_db),
-    templates: Jinja2Templates = Depends(get_templates), page: int = Query(1, ge=1)
-):
+@router.get("/", response_class=HTMLResponse, name="get_logs")
+async def get_logs(request: Request, db: AsyncSession = Depends(get_db), templates: Jinja2Templates = Depends(get_templates)):
+
     page_size = 25
     logs_query = select(models.PrintLog).options(selectinload(models.PrintLog.entries)).order_by(models.PrintLog.created_at.desc())
     total_logs_res = await db.execute(select(func.count()).select_from(models.PrintLog))

@@ -18,7 +18,8 @@
             Poți declanșa manual o sincronizare a comenzilor pentru toate magazinele.
             Acest proces va aduce ultimele comenzi din Shopify în AWB Hub.
         </p>
-        <form action="/sync/run" method="post">
+        
+        <form action="{{ url_for('run_sync') }}" method="post">
             <button type="submit" class="button-primary">Pornește Sincronizarea</button>
         </form>
     </div>

@@ -1,23 +1,79 @@
-<form id="filter-form" action="{{ url_for('read_root') }}" method="get">
-    <div class="filter-container">
-        <div class="filter-item">
-            <label for="store_id">Magazin:</label>
-            <select name="store_id" id="store_id" onchange="this.form.submit()">
-                <option value="">Toate</option>
-                {% for store in stores %}
-                <option value="{{ store.id }}" {% if current_filters.store_id == store.id %}selected{% endif %}>
-                    {{ store.name }}
-                </option>
-                {% endfor %}
-            </select>
-        </div>
+{% extends "_layout.html" %}
 
-        <div class="filter-item">
-            <label for="search">Caută:</label>
-            <input type="text" name="search" id="search" value="{{ current_filters.search or '' }}" placeholder="Nume, telefon, comandă...">
+{% block content %}
+<div class="container">
+    <h1>Comenzi</h1>
+
+    <div class="top-bar">
+        <form id="filter-form" action="{{ url_for('read_root') }}" method="get" class="filter-form">
+            <div class="filter-container">
+                <div class="filter-item">
+                    <label for="store_id">Magazin:</label>
+                    <select name="store_id" id="store_id" onchange="this.form.submit()">
+                        <option value="">Toate</option>
+                        {% for store in stores %}
+                        <option value="{{ store.id }}" {% if current_filters.store_id == store.id %}selected{% endif %}>
+                            {{ store.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label for="search">Caută:</label>
+                    <input type="text" name="search" id="search" value="{{ current_filters.search or '' }}" placeholder="Nume, telefon, comandă...">
+                </div>
+            </div>
+            <input type="hidden" name="sort_by" value="{{ current_filters.sort_by or 'order_date' }}">
+            <input type="hidden" name="sort_dir" value="{{ current_filters.sort_dir or 'desc' }}">
+        </form>
+
+        <div class="actions-container">
+            <button id="generate-awb-button" class="button">Generează AWB</button>
         </div>
-        
-        </div>
-    <input type="hidden" name="sort_by" value="{{ current_filters.sort_by or 'order_date' }}">
-    <input type="hidden" name="sort_dir" value="{{ current_filters.sort_dir or 'desc' }}">
-</form>
+    </div>
+
+    <div class="table-responsive">
+        <table class="orders-table">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="select-all-orders"></th>
+                    <th>Nr. Comandă</th>
+                    <th>Dată</th>
+                    <th>Client</th>
+                    <th>Telefon</th>
+                    <th>Magazin</th>
+                    <th>Status Plata</th>
+                    <th>Status Livrare</th>
+                    <th>AWB</th>
+                    <th>Acțiuni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                <tr class="order-row">
+                    <td><input type="checkbox" class="order-checkbox" value="{{ order.id }}"></td>
+                    <td>{{ order.order_number }}</td>
+                    <td>{{ order.order_date.strftime('%Y-%m-%d %H:%M') if order.order_date else 'N/A' }}</td>
+                    <td>{{ order.pii_data.customer_name if order.pii_data else 'N/A' }}</td>
+                    <td>{{ order.pii_data.customer_phone if order.pii_data else 'N/A' }}</td>
+                    <td>{{ order.store.name if order.store else 'N/A' }}</td>
+                    <td>{{ order.financial_status }}</td>
+                    <td>{{ order.fulfillment_status }}</td>
+                    <td>
+                        {% for shipment in order.shipments %}
+                            {{ shipment.awb or 'În așteptare' }}<br>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10" class="no-data">Nicio comandă găsită. Te rog adaugă un magazin și pornește sincronizarea din pagina de Setări.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
